@@ -9,7 +9,7 @@
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
-#include "Cafe/HW/Latte/Core/LatteTextureLoaderASTC.h"
+#include "Cafe/HW/Latte/Core/LatteTextureLoaderETC2.h"
 
 #include "Cafe/HW/Latte/LegacyShaderDecompiler/LatteDecompiler.h"
 
@@ -620,7 +620,7 @@ VulkanRenderer::VulkanRenderer()
 	deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 	vkGetPhysicalDeviceFeatures2(m_physicalDevice, &deviceFeatures2);
 	m_supportedFormatInfo.fmt_bc = deviceFeatures2.features.textureCompressionBC;
-	m_supportedFormatInfo.fmt_astc = deviceFeatures2.features.textureCompressionASTC_LDR;
+	m_supportedFormatInfo.fmt_etc2 = deviceFeatures2.features.textureCompressionETC2;
 
 	deviceFeatures.independentBlend = VK_TRUE;
 	deviceFeatures.samplerAnisotropy = VK_TRUE;
@@ -640,7 +640,7 @@ VulkanRenderer::VulkanRenderer()
 	deviceFeatures.depthClamp = VK_TRUE;
 	deviceFeatures.depthBiasClamp = VK_TRUE;
 	deviceFeatures.textureCompressionBC = m_supportedFormatInfo.fmt_bc;
-	deviceFeatures.textureCompressionASTC_LDR = m_supportedFormatInfo.fmt_astc;
+	deviceFeatures.textureCompressionETC2 = m_supportedFormatInfo.fmt_etc2;
 
 	if (m_featureControl.deviceExtensions.pipeline_robustness)
 	{
@@ -1942,13 +1942,13 @@ void VulkanRenderer::QueryAvailableFormats()
 		VK_FORMAT_BC5_SNORM_BLOCK,
 	};
 	m_supportedFormatInfo.fmt_bc = m_supportedFormatInfo.fmt_bc && std::all_of(std::begin(bcFormats), std::end(bcFormats), supportsSampledTexture);
-	m_supportedFormatInfo.fmt_astc = m_supportedFormatInfo.fmt_astc &&
-		supportsSampledTexture(VK_FORMAT_ASTC_4x4_UNORM_BLOCK) &&
-		supportsSampledTexture(VK_FORMAT_ASTC_4x4_SRGB_BLOCK);
+	m_supportedFormatInfo.fmt_etc2 = m_supportedFormatInfo.fmt_etc2 &&
+		supportsSampledTexture(VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK) &&
+		supportsSampledTexture(VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK);
 
 	if (!m_supportedFormatInfo.fmt_bc)
 	{
-		cemuLog_log(LogType::Force, "BC texture compression is unavailable; using {} fallback", m_supportedFormatInfo.fmt_astc ? "ASTC 4x4" : "uncompressed");
+		cemuLog_log(LogType::Force, "BC texture compression is unavailable; using {} fallback", m_supportedFormatInfo.fmt_etc2 ? "ETC2/EAC for BC1-3, R8/RG8 for BC4-5" : "uncompressed");
 	}
 
 	vkGetPhysicalDeviceFormatProperties(m_physicalDevice, VK_FORMAT_D24_UNORM_S8_UINT, &fmtProp);
@@ -2701,10 +2701,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC1::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC1_SRGB_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC1_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2718,10 +2718,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC1::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC1_UNORM_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC1_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2735,10 +2735,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC2_UNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC2::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC2_UNORM_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC2_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2752,10 +2752,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC2_SRGB_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC2::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC2_SRGB_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC2_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2769,10 +2769,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC3_UNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC3::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC3_UNORM_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC3_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2786,10 +2786,10 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC3_SRGB_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC3::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
+			else if (m_supportedFormatInfo.fmt_etc2)
 			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC3_SRGB_to_ASTC::getInstance();
+				formatInfoOut->vkImageFormat = VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+				formatInfoOut->decoder = TextureDecoder_BC3_to_ETC2::getInstance();
 			}
 			else
 			{
@@ -2803,11 +2803,6 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC4_UNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC4::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
-			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC4_UNORM_to_ASTC::getInstance();
-			}
 			else
 			{
 				formatInfoOut->vkImageFormat = VK_FORMAT_R8_UNORM;
@@ -2819,11 +2814,6 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 			{
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC4_SNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC4::getInstance();
-			}
-			else if (m_supportedFormatInfo.fmt_astc)
-			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC4_SNORM_to_ASTC::getInstance();
 			}
 			else
 			{
@@ -2837,11 +2827,6 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC5_UNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC5::getInstance();
 			}
-			else if (m_supportedFormatInfo.fmt_astc)
-			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC5_UNORM_to_ASTC::getInstance();
-			}
 			else
 			{
 				formatInfoOut->vkImageFormat = VK_FORMAT_R8G8_UNORM;
@@ -2853,11 +2838,6 @@ void VulkanRenderer::GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isD
 			{
 				formatInfoOut->vkImageFormat = VK_FORMAT_BC5_SNORM_BLOCK;
 				formatInfoOut->decoder = TextureDecoder_BC5::getInstance();
-			}
-			else if (m_supportedFormatInfo.fmt_astc)
-			{
-				formatInfoOut->vkImageFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-				formatInfoOut->decoder = TextureDecoder_BC5_SNORM_to_ASTC::getInstance();
 			}
 			else
 			{

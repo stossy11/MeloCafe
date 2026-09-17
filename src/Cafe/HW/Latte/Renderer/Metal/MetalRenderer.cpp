@@ -921,7 +921,7 @@ void MetalRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, s
 
     // Allocate a temporary buffer
     auto& bufferAllocator = m_memoryManager->GetStagingAllocator();
-    auto allocation = bufferAllocator.AllocateBufferMemory(compressedImageSize, 1);
+    auto allocation = bufferAllocator.AllocateBufferMemory(compressedImageSize, formatInfo.bytesPerBlock);
     memcpy(allocation.memPtr, pixelData, compressedImageSize);
     bufferAllocator.FlushReservation(allocation);
 

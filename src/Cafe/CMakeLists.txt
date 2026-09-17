@@ -138,7 +138,9 @@ add_library(CemuCafe
   HW/Latte/Core/LatteTextureLegacy.cpp
   HW/Latte/Core/LatteTextureLoader.cpp
   HW/Latte/Core/LatteTextureLoader.h
-  HW/Latte/Core/LatteTextureLoaderASTC.h
+  HW/Latte/Core/LatteTextureLoaderETC2.h
+  HW/Latte/Core/ETC2Encoder.h
+  HW/Latte/Core/ETC2Encoder.cpp
   HW/Latte/Core/LatteTextureReadback.cpp
   HW/Latte/Core/LatteTextureReadbackInfo.h
   HW/Latte/Core/LatteTextureView.cpp
@@ -491,29 +493,6 @@ add_library(CemuCafe
   TitleList/TitleInfo.h
   TitleList/TitleList.cpp
   TitleList/TitleList.h
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc.h"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_averages_and_directions.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_block_sizes.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_color_quantize.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_color_unquantize.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_compress_symbolic.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_compute_variance.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_decompress_symbolic.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_diagnostic_trace.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_entry.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_find_best_partitioning.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_ideal_endpoints_and_weights.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_image.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_integer_sequence.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_mathlib.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_mathlib_softfloat.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_partition_tables.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_percentile_tables.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_pick_best_endpoint_format.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_quantization.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_symbolic_physical.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_weight_align.cpp"
-  "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source/astcenc_weight_quant_xfer_tables.cpp"
 )
 
 if (ENABLE_OPENGL)
@@ -667,7 +646,12 @@ if (ENABLE_LIBUSB)
 endif()
 
 target_include_directories(CemuCafe PUBLIC "../")
-target_include_directories(CemuCafe PRIVATE "${CMAKE_SOURCE_DIR}/dependencies/astc-encoder/Source")
+target_include_directories(CemuCafe PRIVATE "${CMAKE_SOURCE_DIR}/dependencies/etcpak")
+target_sources(CemuCafe PRIVATE
+  "${CMAKE_SOURCE_DIR}/dependencies/etcpak/ProcessRGB.cpp"
+  "${CMAKE_SOURCE_DIR}/dependencies/etcpak/Dither.cpp"
+  "${CMAKE_SOURCE_DIR}/dependencies/etcpak/Tables.cpp"
+)
 
 
 if (glslang_VERSION VERSION_LESS "15.0.0")

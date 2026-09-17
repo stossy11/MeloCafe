@@ -21,7 +21,7 @@ struct VkSupportedFormatInfo_t
 	bool fmt_r4g4b4a4_unorm_pack{};
 	bool fmt_a1r5g5b5_unorm_pack{};
 	bool fmt_bc{};
-	bool fmt_astc{};
+	bool fmt_etc2{};
 };
 
 struct VkDescriptorSetInfo

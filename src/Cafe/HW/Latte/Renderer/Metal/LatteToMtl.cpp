@@ -1,6 +1,7 @@
 #include "Cafe/HW/Latte/Renderer/Metal/LatteToMtl.h"
 #include "Cemu/Logging/CemuLogging.h"
 #include "HW/Latte/Core/LatteTextureLoader.h"
+#include "HW/Latte/Core/LatteTextureLoaderETC2.h"
 #include "HW/Latte/Renderer/Metal/MetalCommon.h"
 
 #include <unordered_map>
@@ -142,16 +143,20 @@ void CheckForPixelFormatSupport(const MetalPixelFormatSupport& support)
 
     if (!support.m_supportsBCFormats)
     {
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC1_UNORM] = {MTL::PixelFormatRGBA8Unorm, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC1_RGBA8::getInstance()};
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC1_SRGB] = {MTL::PixelFormatRGBA8Unorm_sRGB, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC1_RGBA8::getInstance()};
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC2_UNORM] = {MTL::PixelFormatRGBA8Unorm, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC2_RGBA8::getInstance()};
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC2_SRGB] = {MTL::PixelFormatRGBA8Unorm_sRGB, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC2_RGBA8::getInstance()};
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC3_UNORM] = {MTL::PixelFormatRGBA8Unorm, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC3_RGBA8::getInstance()};
-        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC3_SRGB] = {MTL::PixelFormatRGBA8Unorm_sRGB, MetalDataType::FLOAT, 4, {1, 1}, false, TextureDecoder_BC3_RGBA8::getInstance()};
+        // tried BCn > ASTC but didn't work properly and produced some weird purple artifacting and i've decided to just use ETC2 -stossy11
+        // plus also used some arm64 NEON stuff to make the compression faster.
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC1_UNORM] = {MTL::PixelFormatEAC_RGBA8, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC1_to_ETC2::getInstance()};
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC1_SRGB] = {MTL::PixelFormatEAC_RGBA8_sRGB, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC1_to_ETC2::getInstance()};
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC2_UNORM] = {MTL::PixelFormatEAC_RGBA8, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC2_to_ETC2::getInstance()};
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC2_SRGB] = {MTL::PixelFormatEAC_RGBA8_sRGB, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC2_to_ETC2::getInstance()};
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC3_UNORM] = {MTL::PixelFormatEAC_RGBA8, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC3_to_ETC2::getInstance()};
+        MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC3_SRGB] = {MTL::PixelFormatEAC_RGBA8_sRGB, MetalDataType::FLOAT, 16, {4, 4}, false, TextureDecoder_BC3_to_ETC2::getInstance()};
         MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC4_UNORM] = {MTL::PixelFormatR8Unorm, MetalDataType::FLOAT, 1, {1, 1}, false, TextureDecoder_BC4_UNORM_To_R8::getInstance()};
         MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC4_SNORM] = {MTL::PixelFormatR8Snorm, MetalDataType::FLOAT, 1, {1, 1}, false, TextureDecoder_BC4_SNORM_To_R8::getInstance()};
         MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC5_UNORM] = {MTL::PixelFormatRG8Unorm, MetalDataType::FLOAT, 2, {1, 1}, false, TextureDecoder_BC5_UNORM_To_RG8::getInstance()};
         MTL_COLOR_FORMAT_TABLE[Latte::E_GX2SURFFMT::BC5_SNORM] = {MTL::PixelFormatRG8Snorm, MetalDataType::FLOAT, 2, {1, 1}, false, TextureDecoder_BC5_SNORM_To_RG8::getInstance()};
+        
+        cemuLog_log(LogType::Force, "Metal: BC texture compression unavailable, using ETC2 instead.");
     }
     else
     {
