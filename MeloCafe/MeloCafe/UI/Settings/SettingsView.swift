@@ -421,6 +421,18 @@ struct SettingsView: View {
                         }
                     }
                 }
+                
+                Section {
+                    HStack {
+                        Text("In memoriam of 'Lily'")
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Image(systemName: "heart")
+                            .foregroundColor(.purple)
+                            .font(.footnote)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } 
             }
             .navigationTitle("Settings") // iOS 15 seems to expect a navigation title, so we'll put this here. -stossy11
         }
