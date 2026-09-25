@@ -74,12 +74,18 @@ if(BUILD_HEADLESS_DYLIB)
         CXX_VISIBILITY_PRESET default
         VISIBILITY_INLINES_HIDDEN OFF
         MACOSX_FRAMEWORK_IDENTIFIER com.stossy11.Cemu
-        FRAMEWORK TRUE
+    	FRAMEWORK TRUE
+
+    	MACOSX_FRAMEWORK_IDENTIFIER com.stossy11.Cemu
+    	MACOSX_FRAMEWORK_BUNDLE_VERSION "1.0.0"
+    	MACOSX_FRAMEWORK_SHORT_VERSION_STRING "1.0.0"
     )
     if(IOS)
         set_target_properties(CemuBin PROPERTIES
             INSTALL_NAME_DIR "@rpath"
             BUILD_WITH_INSTALL_RPATH TRUE
+            SKIP_INSTALL TRUE
+            XCODE_ATTRIBUTE_SKIP_INSTALL "YES"
         )
     endif()
 else()

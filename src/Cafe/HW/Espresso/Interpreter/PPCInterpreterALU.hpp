@@ -842,28 +842,11 @@ static void PPCInterpreter_SRAWI(PPCInterpreter_t* hCPU, uint32 opcode)
 	sint32 rS, rA;
 	uint32 SH;
 	PPC_OPC_TEMPL_X(opcode, rS, rA, SH);
-	hCPU->gpr[rA] = hCPU->gpr[rS];
-	hCPU->xer_ca = 0;
-	if (hCPU->gpr[rA] & 0x80000000)
-	{
-		uint32 ca = 0;
-		for (uint32 i = 0; i < SH; i++)
-		{
-			if (hCPU->gpr[rA] & 1)
-				ca = 1;
-			hCPU->gpr[rA] >>= 1;
-			hCPU->gpr[rA] |= 0x80000000;
-		}
-		if (ca)
-			hCPU->xer_ca = 1;
-	}
-	else
-	{
-		if (SH > 31)
-			hCPU->gpr[rA] = 0;
-		else
-			hCPU->gpr[rA] >>= SH;
-	}
+	const uint32 s = hCPU->gpr[rS];
+	
+	const uint32 droppedBits = s & ~(0xFFFFFFFFu << SH);
+	hCPU->xer_ca = (uint8)((s >> 31) & (droppedBits != 0 ? 1u : 0u));
+	hCPU->gpr[rA] = (uint32)((sint32)s >> SH);
 	if (opHasRC())
 		ppc_update_cr0(hCPU, hCPU->gpr[rA]);
 	PPCInterpreter_nextInstruction(hCPU);
@@ -871,16 +854,7 @@ static void PPCInterpreter_SRAWI(PPCInterpreter_t* hCPU, uint32 opcode)
 
 static uint32 _CNTLZW(uint32 v)
 {
-	uint32 result = 0;
-	if (v == 0)
-		return 32;
-	if ((v & 0xFFFF0000) != 0) { result |= 16; v >>= 16; }
-	if ((v & 0xFF00FF00) != 0) { result |= 8; v >>= 8; }
-	if ((v & 0xF0F0F0F0) != 0) { result |= 4; v >>= 4; }
-	if ((v & 0xCCCCCCCC) != 0) { result |= 2; v >>= 2; }
-	if ((v & 0xAAAAAAAA) != 0) { result |= 1; }
-	result = 31 - result;
-	return result;
+	return (uint32)std::countl_zero(v); // single clz on aarch64
 }
 
 static void PPCInterpreter_CNTLZW(PPCInterpreter_t* hCPU, uint32 opcode)

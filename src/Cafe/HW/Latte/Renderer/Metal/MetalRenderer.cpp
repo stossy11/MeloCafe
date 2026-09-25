@@ -722,6 +722,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Triangle fans              %u", m_performanceMonitor.m_triangleFans);
     ImGui::Text("Snapshot uploads           %llu KB (reuses: %u)", static_cast<unsigned long long>(m_performanceMonitor.m_snapshotBytes / 1024), m_performanceMonitor.m_snapshotReuses);
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
+    ImGui::Text("Residency declarations     %u (skipped: %u)", m_performanceMonitor.m_residencyDeclarations, m_performanceMonitor.m_residencySkips);
 
     ImGui::Text("--- Cache debug info ---");
 
@@ -1006,6 +1007,9 @@ void MetalRenderer::texture_notifyDelete(LatteTextureView* textureView)
         for (uint32 i = 0; i < MAX_MTL_TEXTURES; i++)
             m_state.m_encoderState.m_textures[shaderType][i] = nullptr;
     }
+
+    
+    m_encoderResidency.clear();
 }
 
 void MetalRenderer::texture_copyImageSubData(LatteTexture* src, sint32 srcMip, sint32 effectiveSrcX, sint32 effectiveSrcY, sint32 srcSlice, LatteTexture* dst, sint32 dstMip, sint32 effectiveDstX, sint32 effectiveDstY, sint32 dstSlice, sint32 effectiveCopyWidth, sint32 effectiveCopyHeight, sint32 srcDepth_)
@@ -2183,6 +2187,33 @@ void MetalRenderer::SetSamplerState(MTL::RenderCommandEncoder* renderCommandEnco
     }
 }
 
+void MetalRenderer::DeclareResidency(MTL::RenderCommandEncoder* renderCommandEncoder, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stages)
+{
+    if (!resource)
+        return;
+    
+    
+    uint32 requested = 0;
+    for (uint32 stageIndex = 0; stageIndex < 5; stageIndex++)
+    {
+        if ((uint32)stages & (1u << stageIndex))
+            requested |= ((uint32)usage & 0xF) << (stageIndex * 4);
+    }
+    if (requested == 0)
+        return;
+
+    uint32& declared = m_encoderResidency[resource];
+    if ((declared & requested) == requested)
+    {
+        m_performanceMonitor.m_residencySkips++;
+        return;
+    }
+
+    declared |= requested;
+    renderCommandEncoder->useResource(resource, usage, stages);
+    m_performanceMonitor.m_residencyDeclarations++;
+}
+
 MTL::CommandBuffer* MetalRenderer::GetCommandBuffer()
 {
     bool needsNewCommandBuffer = (!m_currentCommandBuffer.m_commandBuffer || m_currentCommandBuffer.m_commited);
@@ -2228,6 +2259,8 @@ MTL::RenderCommandEncoder* MetalRenderer::GetTemporaryRenderCommandEncoder(MTL::
 #endif
     m_commandEncoder = renderCommandEncoder;
     m_encoderType = MetalEncoderType::Render;
+
+    ResetEncoderState();
 
     // Debug
     m_performanceMonitor.m_renderPasses++;
@@ -2685,7 +2718,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::TextureBase + relative_textureUnit] = {MetalArgumentBinding::Type::Texture, mtlTexture, 0};
-            renderCommandEncoder->useResource(mtlTexture, MTL::ResourceUsageRead | MTL::ResourceUsageSample, renderStage);
+            DeclareResidency(renderCommandEncoder, mtlTexture, MTL::ResourceUsageRead | MTL::ResourceUsageSample, renderStage);
         }
         else
             SetTexture(renderCommandEncoder, mtlShaderType, mtlTexture, binding);
@@ -2788,7 +2821,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::SupportBuffer] = {MetalArgumentBinding::Type::Buffer, allocation->mtlBuffer, allocation->bufferOffset};
-            renderCommandEncoder->useResource(allocation->mtlBuffer, MTL::ResourceUsageRead, renderStage);
+            DeclareResidency(renderCommandEncoder, allocation->mtlBuffer, MTL::ResourceUsageRead, renderStage);
         }
         else
             SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, shader->resourceMapping.uniformVarsBufferBindingPoint);
@@ -2825,7 +2858,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
             if (argumentEncoder)
             {
                 argumentBindings[MetalArgumentBuffer::UniformBufferBase + i] = {MetalArgumentBinding::Type::Buffer, buffer, offset};
-                renderCommandEncoder->useResource(buffer, MTL::ResourceUsageRead, renderStage);
+                DeclareResidency(renderCommandEncoder, buffer, MTL::ResourceUsageRead, renderStage);
             }
             else
                 SetBuffer(renderCommandEncoder, mtlShaderType, buffer, offset, binding);
@@ -2839,7 +2872,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::StreamoutBuffer] = {MetalArgumentBinding::Type::Buffer, xfbRingBuffer, 0};
-            renderCommandEncoder->useResource(xfbRingBuffer, MTL::ResourceUsageWrite, renderStage);
+            DeclareResidency(renderCommandEncoder, xfbRingBuffer, MTL::ResourceUsageWrite, renderStage);
         }
         else
             SetBuffer(renderCommandEncoder, mtlShaderType, xfbRingBuffer, 0, shader->resourceMapping.tfStorageBindingPoint);
@@ -2871,7 +2904,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                     vertexBufferSize = 0;
                 }
                 argumentBindings[MetalArgumentBuffer::VertexBufferBase + bufferIndex] = {MetalArgumentBinding::Type::Buffer, vertexBuffer, vertexBufferOffset};
-                renderCommandEncoder->useResource(vertexBuffer, MTL::ResourceUsageRead, renderStage);
+                DeclareResidency(renderCommandEncoder, vertexBuffer, MTL::ResourceUsageRead, renderStage);
                 vertexBufferSize = std::min<size_t>(vertexBufferSize, vertexBuffer->length() - vertexBufferOffset);
                 argumentBindings[MetalArgumentBuffer::VertexBufferSizeBase + bufferIndex] = {MetalArgumentBinding::Type::Constant, nullptr,
                     static_cast<uint32>(std::min<size_t>(vertexBufferSize, std::numeric_limits<uint32>::max()))};
@@ -2892,7 +2925,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                 indexBufferSize = 0;
             }
             argumentBindings[MetalArgumentBuffer::IndexBuffer] = {MetalArgumentBinding::Type::Buffer, indexBuffer, indexBufferOffset};
-            renderCommandEncoder->useResource(indexBuffer, MTL::ResourceUsageRead, renderStage);
+            DeclareResidency(renderCommandEncoder, indexBuffer, MTL::ResourceUsageRead, renderStage);
             indexBufferSize = std::min<size_t>(indexBufferSize, indexBuffer->length() - indexBufferOffset);
             argumentBindings[MetalArgumentBuffer::IndexBufferSize] = {MetalArgumentBinding::Type::Constant, nullptr,
                 static_cast<uint32>(std::min<size_t>(indexBufferSize, std::numeric_limits<uint32>::max()))};

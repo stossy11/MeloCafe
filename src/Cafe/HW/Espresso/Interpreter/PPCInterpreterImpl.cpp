@@ -5,6 +5,8 @@
 #include <atomic>
 #include <vector>
 #include <algorithm>
+#include <mutex>
+#include <thread>
 #include "PPCInterpreterHelper.h"
 #include "Cafe/HW/Espresso/Debugger/Debugger.h"
 #include "Cafe/HW/Espresso/Debugger/GDBStub.h"
@@ -449,113 +451,224 @@ struct PPCBlockEntry
 };
 static_assert(sizeof(PPCBlockEntry) == 16);
 
-struct PPCBlockRef
+using PPCBlockDesc = uint64;
+
+static constexpr uint32 PPCBLOCK_TABLE_BITS = 18;
+static constexpr uint32 PPCBLOCK_TABLE_SIZE = 1u << PPCBLOCK_TABLE_BITS;
+static constexpr uint32 PPCBLOCK_TABLE_MAX_USED = PPCBLOCK_TABLE_SIZE * 3 / 4;
+static constexpr uint32 PPCBLOCK_MAX_LENGTH = 64;
+static constexpr uint32 PPCBLOCK_POOL_ENTRIES = 1u << 22;
+
+static inline PPCBlockDesc PPCBlockDesc_pack(uint32 startAddr, uint32 firstEntry, uint32 count, PPCBlockTerm term)
 {
-    uint32 startAddr;
-    uint32 firstEntry;
-    uint16 count;
-    PPCBlockTerm term;
-    uint8 _pad;
+    return (1ull << 63)
+        | ((uint64)(startAddr >> 2) << 33)
+        | ((uint64)firstEntry << 11)
+        | ((uint64)(count - 1) << 5)
+        | ((uint64)term << 2);
+}
+
+static inline uint32 PPCBlockDesc_keyForAddr(uint32 addr) { return 0x40000000u | (addr >> 2); }
+static inline uint32 PPCBlockDesc_key(PPCBlockDesc d) { return (uint32)(d >> 33); }
+static inline uint32 PPCBlockDesc_firstEntry(PPCBlockDesc d) { return (uint32)(d >> 11) & 0x3FFFFF; }
+static inline uint32 PPCBlockDesc_count(PPCBlockDesc d) { return ((uint32)(d >> 5) & 0x3F) + 1; }
+static inline PPCBlockTerm PPCBlockDesc_term(PPCBlockDesc d) { return (PPCBlockTerm)((uint32)(d >> 2) & 7); }
+
+struct PPCBlockSlot
+{
+    std::atomic<PPCBlockDesc> desc;
+    std::atomic<uint32> nextSlot;
+    uint32 _pad;
+};
+static_assert(sizeof(PPCBlockSlot) == 16);
+
+struct alignas(64) PPCBlockThreadState
+{
+    std::atomic<uint32> ack;
+    PPCBlockSlot linkScratch;
 };
 
-class PPCBlockCache
-{
-public:
-    static constexpr uint32 TABLE_BITS = 18;
-    static constexpr uint32 TABLE_SIZE = 1u << TABLE_BITS;
-    static constexpr uint32 TABLE_MAX_USED = TABLE_SIZE * 3 / 4;
-    static constexpr uint32 MAX_BLOCK_LENGTH = 64;
-    static constexpr size_t MAX_POOL_ENTRIES = 1024 * 1024;
+static PPCBlockSlot* s_blockTable = nullptr;
+static PPCBlockEntry* s_blockPool = nullptr;
+static std::atomic<bool> s_blockCacheReady{false};
+static std::atomic<uint32> s_blockTableUsed{0};
+static std::atomic<uint32> s_blockPoolHead{0};
+static std::atomic<uint64> s_blockDecodes{0};
+static std::atomic<uint32> s_blockResets{0};
 
-    PPCBlockCache()
-    {
-        m_table.resize(TABLE_SIZE);
-        m_entries.reserve(64 * 1024);
-        clear("init");
-    }
+static std::atomic<uint32> s_blockCacheGeneration{2};
 
-    static uint32 hashSlot(uint32 addr)
-    {
-        return ((addr >> 2) * 0x9E3779B1u) >> (32 - TABLE_BITS);
-    }
+static constexpr uint32 PPCBLOCK_MAX_THREADS = 16;
+static PPCBlockThreadState s_blockThreadStates[PPCBLOCK_MAX_THREADS];
+static std::atomic<uint32> s_blockThreadCount{0};
+static std::mutex s_blockCacheMutex;
 
-    PPCBlockRef* lookup(uint32 addr)
-    {
-        uint32 i = hashSlot(addr);
-        for (;;)
-        {
-            PPCBlockRef& r = m_table[i];
-            if (r.count == 0)
-                return nullptr;
-            if (r.startAddr == addr)
-                return &r;
-            i = (i + 1) & (TABLE_SIZE - 1);
-        }
-    }
-    
-    PPCBlockRef* allocSlot(uint32 addr)
-    {
-        if (m_used >= TABLE_MAX_USED) [[unlikely]]
-            clear("table full");
-        else if (m_entries.size() + MAX_BLOCK_LENGTH > MAX_POOL_ENTRIES) [[unlikely]]
-            clear("pool full");
-        
-        uint32 i = hashSlot(addr);
-        
-        while (m_table[i].count != 0)
-            i = (i + 1) & (TABLE_SIZE - 1);
-        
-        m_used++;
-        return &m_table[i];
-    }
-
-    void clear(const char* reason)
-    {
-        std::fill(m_table.begin(), m_table.end(), PPCBlockRef{});
-        
-        m_entries.clear();
-        m_used = 0;
-        m_clears++;
-        
-        if (m_clears <= 16 || (m_clears & 0xFF) == 0)
-            cemuLog_log(LogType::Force, "PPC block cache: clear #{} ({}), {} blocks decoded since start", m_clears, reason, m_decodes);
-    }
-
-    std::vector<PPCBlockRef> m_table;
-    std::vector<PPCBlockEntry> m_entries;
-    uint32 m_used = 0;
-    uint32 m_generation = 0;
-    uint64 m_decodes = 0;
-    uint32 m_clears = 0;
-};
-
-
-static std::atomic<uint32> s_blockCacheGeneration{1};
 static std::atomic<uint32> s_blockCacheCodePages[(1u << 20) / 32]; // 4 GiB / 4 KiB pages, 1 bit each
 
 static inline void PPCBlockCache_markCodePage(uint32 addr)
 {
     const uint32 page = addr >> 12;
+    const uint32 bit = 1u << (page & 31);
+    std::atomic<uint32>& word = s_blockCacheCodePages[page >> 5];
     
-    s_blockCacheCodePages[page >> 5].fetch_or(1u << (page & 31), std::memory_order_relaxed);
+    if ((word.load(std::memory_order_relaxed) & bit) == 0)
+        word.fetch_or(bit, std::memory_order_relaxed);
 }
 
 static inline bool PPCBlockCache_isCodePage(uint32 addr)
 {
     const uint32 page = addr >> 12;
-    
+
     return (s_blockCacheCodePages[page >> 5].load(std::memory_order_relaxed) >> (page & 31)) & 1;
+}
+
+static void PPCBlockCache_ensureAllocated()
+{
+    if (s_blockCacheReady.load(std::memory_order_acquire))
+        return;
+
+    std::lock_guard<std::mutex> lock(s_blockCacheMutex);
+    if (s_blockTable)
+        return;
+
+    s_blockTable = new PPCBlockSlot[PPCBLOCK_TABLE_SIZE]{};
+    s_blockPool = new PPCBlockEntry[PPCBLOCK_POOL_ENTRIES];
+    s_blockCacheReady.store(true, std::memory_order_release);
+}
+
+static thread_local PPCBlockThreadState* t_blockThreadState = nullptr;
+static thread_local bool t_blockThreadStateResolved = false;
+
+TLS_WORKAROUND_NOINLINE static PPCBlockThreadState* PPCBlockCache_getThreadState()
+{
+    if (!t_blockThreadStateResolved)
+    {
+        t_blockThreadStateResolved = true;
+        PPCBlockCache_ensureAllocated();
+
+        const uint32 index = s_blockThreadCount.fetch_add(1, std::memory_order_relaxed);
+        if (index < PPCBLOCK_MAX_THREADS)
+            t_blockThreadState = &s_blockThreadStates[index];
+        else
+            cemuLog_log(LogType::Force, "PPC block cache: more than {} interpreter threads, this one falls back to uncached dispatch", PPCBLOCK_MAX_THREADS);
+    }
+    return t_blockThreadState;
+}
+
+static uint32 PPCBlockCache_synchronize(PPCBlockThreadState& ts)
+{
+    uint32 gen;
+    for (uint64 spin = 0; ; spin++)
+    {
+        gen = s_blockCacheGeneration.load(std::memory_order_acquire);
+        ts.ack.store(gen, std::memory_order_release);
+        if ((gen & 1) == 0)
+            break;
+        if (spin > 64)
+            std::this_thread::yield();
+    }
+    return gen;
+}
+
+
+static void PPCBlockCache_reset(const char* reason, uint32 expectedGeneration = 0)
+{
+    if (PPCBlockThreadState* self = t_blockThreadState)
+        self->ack.store(0, std::memory_order_release);
+
+    std::lock_guard<std::mutex> lock(s_blockCacheMutex);
+
+    if (!s_blockTable)
+        return;
+    if (expectedGeneration != 0 && s_blockCacheGeneration.load(std::memory_order_relaxed) != expectedGeneration)
+        return;
+
+    const uint32 gen = s_blockCacheGeneration.load(std::memory_order_relaxed);
+    const uint32 parked = gen | 1;
+    s_blockCacheGeneration.store(parked, std::memory_order_release);
+
+    const uint32 threadCount = std::min<uint32>(s_blockThreadCount.load(std::memory_order_relaxed), PPCBLOCK_MAX_THREADS);
+    for (uint32 i = 0; i < threadCount; i++)
+    {
+        const std::atomic<uint32>& ack = s_blockThreadStates[i].ack;
+        for (uint64 spin = 0; ; spin++)
+        {
+            const uint32 a = ack.load(std::memory_order_acquire);
+            if (a == 0 || a == parked)
+                break;
+            if (spin > 64)
+                std::this_thread::yield();
+            if (spin == 1000000)
+                cemuLog_log(LogType::Force, "PPC block cache: still waiting for core {} to reach a block boundary", i);
+        }
+    }
+
+    for (auto& w : s_blockCacheCodePages)
+        w.store(0, std::memory_order_relaxed);
+    
+    for (uint32 i = 0; i < PPCBLOCK_TABLE_SIZE; i++)
+    {
+        s_blockTable[i].desc.store(0, std::memory_order_relaxed);
+        s_blockTable[i].nextSlot.store(0, std::memory_order_relaxed);
+    }
+    s_blockTableUsed.store(0, std::memory_order_relaxed);
+    s_blockPoolHead.store(0, std::memory_order_relaxed);
+
+    const uint32 resets = s_blockResets.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (resets <= 16 || (resets & 0xFF) == 0)
+        cemuLog_log(LogType::Force, "PPC block cache: reset #{} ({}), {} blocks decoded since start", resets, reason, s_blockDecodes.load(std::memory_order_relaxed));
+
+    s_blockCacheGeneration.store(parked + 1, std::memory_order_release);
+}
+
+static inline uint32 PPCBlockCache_hashSlot(uint32 addr)
+{
+    return ((addr >> 2) * 0x9E3779B1u) >> (32 - PPCBLOCK_TABLE_BITS);
+}
+
+static PPCBlockSlot* PPCBlockCache_lookup(uint32 addr)
+{
+    const uint32 key = PPCBlockDesc_keyForAddr(addr);
+    uint32 i = PPCBlockCache_hashSlot(addr);
+    for (uint32 probe = 0; probe < PPCBLOCK_TABLE_SIZE; probe++)
+    {
+        PPCBlockSlot& slot = s_blockTable[i];
+        const PPCBlockDesc desc = slot.desc.load(std::memory_order_acquire);
+        if (desc == 0)
+            return nullptr;
+        if (PPCBlockDesc_key(desc) == key)
+            return &slot;
+        i = (i + 1) & (PPCBLOCK_TABLE_SIZE - 1);
+    }
+    return nullptr;
+}
+
+static PPCBlockSlot* PPCBlockCache_publish(uint32 addr, PPCBlockDesc desc)
+{
+    const uint32 key = PPCBlockDesc_key(desc);
+    uint32 i = PPCBlockCache_hashSlot(addr);
+    for (uint32 probe = 0; probe < PPCBLOCK_TABLE_SIZE; probe++)
+    {
+        PPCBlockSlot& slot = s_blockTable[i];
+        PPCBlockDesc cur = slot.desc.load(std::memory_order_acquire);
+        if (cur == 0)
+        {
+            if (slot.desc.compare_exchange_strong(cur, desc, std::memory_order_release, std::memory_order_acquire))
+            {
+                s_blockTableUsed.fetch_add(1, std::memory_order_relaxed);
+                return &slot;
+            }
+        }
+        if (PPCBlockDesc_key(cur) == key)
+            return &slot;
+        i = (i + 1) & (PPCBLOCK_TABLE_SIZE - 1);
+    }
+    return nullptr;
 }
 
 void PPCInterpreter_invalidateBlockCache()
 {
-    for (auto& w : s_blockCacheCodePages)
-        w.store(0, std::memory_order_relaxed);
-    
-    const uint32 gen = s_blockCacheGeneration.fetch_add(1, std::memory_order_release) + 1;
-    
-    if (gen <= 16 || (gen & 0xFF) == 0)
-        cemuLog_log(LogType::Force, "PPC block cache: global invalidation #{}", gen);
+    PPCBlockCache_reset("code invalidated");
 }
 
 void PPCInterpreter_invalidateBlockCacheRange(uint32 addr, uint32 size)
@@ -572,15 +685,6 @@ void PPCInterpreter_invalidateBlockCacheRange(uint32 addr, uint32 size)
         if (page == 0xFFFFF)
             break;
     }
-}
-
-static thread_local PPCBlockCache* t_ppcBlockCache = nullptr;
-
-TLS_WORKAROUND_NOINLINE static PPCBlockCache& PPCBlockCache_getForCurrentThread()
-{
-    if (!t_ppcBlockCache)
-        t_ppcBlockCache = new PPCBlockCache();
-    return *t_ppcBlockCache;
 }
 
 #if (defined(__clang__) || defined(__GNUC__)) && !defined(PPC_INTERPRETER_DISABLE_THREADED_DISPATCH) && !defined(__DEBUG_OUTPUT_INSTRUCTION)
@@ -1318,15 +1422,21 @@ public:
         case 13: fn = PPCInterpreter_ADDIC_; break;
         case 14: fn = PPCInterpreter_ADDI; break;
         case 15: fn = PPCInterpreter_ADDIS; break;
-        case 16: term = PPCBlockTerm::BCX; break;
-        case 18: term = PPCBlockTerm::BX; break;
+        case 16: term = PPCBlockTerm::BCX; fn = blockTermBCX; break;
+        case 18: term = PPCBlockTerm::BX; fn = blockTermBX; break;
         case 19:
         {
             const uint32 ext = PPC_getBits(opcode, 30, 10);
             if (ext == 16)
+            {
                 term = PPCBlockTerm::BCLRX;
+                fn = blockTermBCLRX;
+            }
             else if (ext == 528)
+            {
                 term = PPCBlockTerm::BCCTR;
+                fn = blockTermBCCTR;
+            }
             else if (ext == 50 || ext == 150) // rfi, isync > classic path, terminate
                 term = PPCBlockTerm::Generic;
             else
@@ -1447,25 +1557,29 @@ public:
             fn = blockFallbackStep;
         return PPCBlockEntry{fn, opcode, 0};
     }
-
-    static PPCBlockRef* decodeBlock(PPCInterpreter_t* hCPU, PPCBlockCache& cache, uint32 startAddr)
+    
+    static PPCBlockSlot* decodeBlock(PPCInterpreter_t* hCPU, uint32 startAddr)
     {
-        PPCBlockRef* ref = cache.allocSlot(startAddr);
-        cache.m_decodes++;
+        const uint32 generation = s_blockCacheGeneration.load(std::memory_order_relaxed);
+        if (s_blockTableUsed.load(std::memory_order_relaxed) >= PPCBLOCK_TABLE_MAX_USED) [[unlikely]]
+        {
+            PPCBlockCache_reset("table full", generation);
+            return nullptr;
+        }
         
+        PPCBlockEntry scratch[PPCBLOCK_MAX_LENGTH];
+
         PPCBlockCache_markCodePage(startAddr);
 
-        const uint32 firstEntry = (uint32)cache.m_entries.size();
         uint32 addr = startAddr;
         uint32 count = 0;
         PPCBlockTerm term = PPCBlockTerm::None;
-        while (count < PPCBlockCache::MAX_BLOCK_LENGTH)
+        while (count < PPCBLOCK_MAX_LENGTH)
         {
             if ((addr & 0xFFF) == 0 && addr != startAddr)
                 PPCBlockCache_markCodePage(addr);
             const uint32 opcode = ppcItpCtrl::memory_readCodeU32(hCPU, addr);
-            cache.m_entries.push_back(decodeEntry(opcode, term));
-            count++;
+            scratch[count++] = decodeEntry(opcode, term);
             addr += 4;
             if (term != PPCBlockTerm::None)
                 break;
@@ -1473,11 +1587,16 @@ public:
                 break;
         }
 
-        ref->startAddr = startAddr;
-        ref->firstEntry = firstEntry;
-        ref->count = (uint16)count;
-        ref->term = term;
-        return ref;
+        const uint32 firstEntry = s_blockPoolHead.fetch_add(count, std::memory_order_relaxed);
+        if (firstEntry >= PPCBLOCK_POOL_ENTRIES || count > PPCBLOCK_POOL_ENTRIES - firstEntry) [[unlikely]]
+        {
+            PPCBlockCache_reset("pool full", generation);
+            return nullptr;
+        }
+        memcpy(s_blockPool + firstEntry, scratch, count * sizeof(PPCBlockEntry));
+        s_blockDecodes.fetch_add(1, std::memory_order_relaxed);
+
+        return PPCBlockCache_publish(startAddr, PPCBlockDesc_pack(startAddr, firstEntry, count, term));
     }
 
     static inline void blockTermBX(PPCInterpreter_t* hCPU, uint32 opcode)
@@ -1555,59 +1674,81 @@ public:
     
     static void executeTimesliceCached(PPCInterpreter_t* hCPU)
     {
-        PPCBlockCache* cache = &PPCBlockCache_getForCurrentThread();
+        PPCBlockThreadState* ts = PPCBlockCache_getThreadState();
+        if (!ts) [[unlikely]]
+        {
+            executeInstruction<true>(hCPU);
+            return;
+        }
+
+        PPCBlockSlot* const table = s_blockTable;
+        const PPCBlockEntry* const pool = s_blockPool;
+        PPCBlockSlot* prev = &ts->linkScratch;
+        uint32 myGeneration = 0;
+
         while (hCPU->remainingCycles > 0)
         {
-            const uint32 gen = s_blockCacheGeneration.load(std::memory_order_acquire);
-            if (gen != cache->m_generation) [[unlikely]]
+            
+            const uint32 gen = s_blockCacheGeneration.load(std::memory_order_relaxed);
+            if (gen != myGeneration) [[unlikely]]
             {
-                cache->clear("code invalidated");
-                cache->m_generation = gen;
+                myGeneration = PPCBlockCache_synchronize(*ts);
+                prev = &ts->linkScratch;
             }
-
+            
             const uint32 ip = (uint32)hCPU->instructionPointer;
-            PPCBlockRef* block = cache->lookup(ip);
-            if (!block) [[unlikely]]
-                block = decodeBlock(hCPU, *cache, ip);
-
-            const uint32 count = block->count;
-            const PPCBlockTerm term = block->term;
-            const uint32 straight = (term == PPCBlockTerm::None) ? count : count - 1;
+            const uint32 key = PPCBlockDesc_keyForAddr(ip);
+            
+            
+            PPCBlockSlot* slot = table + prev->nextSlot.load(std::memory_order_relaxed);
+            PPCBlockDesc desc = slot->desc.load(std::memory_order_acquire);
+            if (PPCBlockDesc_key(desc) != key) [[unlikely]]
+            {
+                slot = PPCBlockCache_lookup(ip);
+                if (!slot)
+                    slot = decodeBlock(hCPU, ip);
+                
+                desc = slot ? slot->desc.load(std::memory_order_acquire) : 0;
+                
+                if (PPCBlockDesc_key(desc) != key) [[unlikely]]
+                {
+                    executeInstruction<false>(hCPU);
+                    hCPU->remainingCycles--;
+                    continue;
+                }
+                
+                prev->nextSlot.store((uint32)(slot - table), std::memory_order_relaxed);
+            }
+            
+            
+            const uint32 count = PPCBlockDesc_count(desc);
+            const PPCBlockTerm term = PPCBlockDesc_term(desc);
             
             hCPU->remainingCycles -= (sint32)count;
-
-            const PPCBlockEntry* e = cache->m_entries.data() + block->firstEntry;
-            const PPCBlockEntry* const end = e + straight;
-            for (; e != end; ++e)
+            
+            const PPCBlockEntry* e = pool + PPCBlockDesc_firstEntry(desc);
+            const PPCBlockEntry* const last = e + (count - 1);
+            for (; e != last; ++e)
                 e->fn(hCPU, e->opcode);
+
+            if (term == PPCBlockTerm::Generic) [[unlikely]]
+            {
+                ts->ack.store(0, std::memory_order_release);
+                e->fn(hCPU, e->opcode);
+                myGeneration = 0;
+                continue;
+            }
+
+            e->fn(hCPU, e->opcode);
 
 #ifdef CEMU_DEBUG_ASSERT
-            if (hCPU->instructionPointer != ip + straight * 4)
+            if (term == PPCBlockTerm::None && hCPU->instructionPointer != ip + count * 4)
                 assert_dbg();
 #endif
-
-            switch (term)
-            {
-            case PPCBlockTerm::None:
-                break;
-            case PPCBlockTerm::BX:
-                blockTermBX(hCPU, e->opcode);
-                break;
-            case PPCBlockTerm::BCX:
-                blockTermBCX(hCPU, e->opcode);
-                break;
-            case PPCBlockTerm::BCLRX:
-                blockTermBCLRX(hCPU, e->opcode);
-                break;
-            case PPCBlockTerm::BCCTR:
-                blockTermBCCTR(hCPU, e->opcode);
-                break;
-            case PPCBlockTerm::Generic:
-                e->fn(hCPU, e->opcode);
-                cache = &PPCBlockCache_getForCurrentThread();
-                break;
-            }
+            prev = slot;
         }
+
+        ts->ack.store(0, std::memory_order_release);
     }
 
 };

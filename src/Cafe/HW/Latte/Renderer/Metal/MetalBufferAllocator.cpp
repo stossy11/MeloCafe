@@ -168,13 +168,13 @@ void MetalSynchronizedRingAllocator::GetStats(uint32& numBuffers, size_t& totalB
 MetalSynchronizedHeapAllocator::AllocatorReservation* MetalSynchronizedHeapAllocator::AllocateBufferMemory(uint32 size, uint32 alignment)
 {
 	CHAddr addr = m_chunkedHeap.alloc(size, alignment);
-	m_activeAllocations.emplace_back(addr);
 	AllocatorReservation* res = m_poolAllocatorReservation.allocObj();
 	res->bufferIndex = addr.chunkIndex;
 	res->bufferOffset = addr.offset;
 	res->size = size;
 	res->mtlBuffer = m_chunkedHeap.GetBufferByIndex(addr.chunkIndex);
 	res->memPtr = m_chunkedHeap.GetChunkPtr(addr.chunkIndex) + addr.offset;
+	res->heapAllocation = addr;
 
 	return res;
 }
@@ -183,10 +183,8 @@ void MetalSynchronizedHeapAllocator::FreeReservation(AllocatorReservation* uploa
 {
 	// put the allocation on a delayed release queue for the current command buffer
 	MTL::CommandBuffer* currentCommandBuffer = m_mtlr->GetCurrentCommandBuffer();
-	auto it = std::find_if(m_activeAllocations.begin(), m_activeAllocations.end(), [&uploadReservation](const TrackedAllocation& allocation) { return allocation.allocation.chunkIndex == uploadReservation->bufferIndex && allocation.allocation.offset == uploadReservation->bufferOffset; });
-	cemu_assert_debug(it != m_activeAllocations.end());
-	m_releaseQueue[currentCommandBuffer].emplace_back(it->allocation);
-	m_activeAllocations.erase(it);
+	cemu_assert_debug(uploadReservation->heapAllocation.isValid());
+	m_releaseQueue[currentCommandBuffer].emplace_back(uploadReservation->heapAllocation);
 	m_poolAllocatorReservation.freeObj(uploadReservation);
 }
 

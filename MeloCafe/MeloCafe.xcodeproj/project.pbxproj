@@ -9,8 +9,8 @@
 /* Begin PBXBuildFile section */
 		4E1700AD2F5BB42D00B278B3 /* libCemuInput.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E17009F2F5BB42D00B278B3 /* libCemuInput.a */; };
 		4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F4372F5A950A003D2387 /* GameController.framework */; };
-		4E36B5952F824F31009A2F1A /* Cemu.framework/Cemu in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E1700952F5BB42D00B278B3 /* Cemu.framework/Cemu */; };
-		4E36B5962F824F31009A2F1A /* Cemu.framework/Cemu in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4E1700952F5BB42D00B278B3 /* Cemu.framework/Cemu */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		4E36B5952F824F31009A2F1A /* Cemu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E1700952F5BB42D00B278B3 /* Cemu.framework */; };
+		4E36B5962F824F31009A2F1A /* Cemu.framework in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4E1700952F5BB42D00B278B3 /* Cemu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F3FC2F599094003D2387 /* Metal.framework */; };
 		4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */; };
 /* End PBXBuildFile section */
@@ -46,7 +46,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				4E36B5962F824F31009A2F1A /* Cemu.framework/Cemu in Embed Libraries */,
+				4E36B5962F824F31009A2F1A /* Cemu.framework in Embed Libraries */,
 			);
 			name = "Embed Libraries";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -109,7 +109,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */,
-				4E36B5952F824F31009A2F1A /* Cemu.framework/Cemu in Frameworks */,
+				4E36B5952F824F31009A2F1A /* Cemu.framework in Frameworks */,
 				4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */,
 				4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */,
 				4E1700AD2F5BB42D00B278B3 /* libCemuInput.a in Frameworks */,
@@ -122,7 +122,7 @@
 		4E17002C2F5BB19300B278B3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4E1700952F5BB42D00B278B3 /* Cemu.framework/Cemu */,
+				4E1700952F5BB42D00B278B3 /* Cemu.framework */,
 				4E17009F2F5BB42D00B278B3 /* libCemuInput.a */,
 			);
 			name = Products;
@@ -229,10 +229,9 @@
 /* End PBXProject section */
 
 /* Begin PBXReferenceProxy section */
-		4E1700952F5BB42D00B278B3 /* Cemu.framework/Cemu */ = {
+		4E1700952F5BB42D00B278B3 /* Cemu.framework */ = {
 			isa = PBXReferenceProxy;
 			fileType = wrapper.framework;
-			name = Cemu.framework/Cemu;
 			path = Cemu.framework;
 			remoteRef = 4E1700942F5BB42D00B278B3 /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;

@@ -7,6 +7,8 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalOutputShaderCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalAttachmentsInfo.h"
 
+#include <unordered_map>
+
 enum MetalGeneralShaderType
 {
     METAL_GENERAL_SHADER_TYPE_VERTEX,
@@ -340,6 +342,8 @@ public:
     void ResetEncoderState()
     {
         m_state.m_encoderState = {};
+        
+        m_encoderResidency.clear();
 
         // TODO: set viewport and scissor to render target dimensions if render commands
 
@@ -362,6 +366,7 @@ public:
     void SetBuffer(MTL::RenderCommandEncoder* renderCommandEncoder, MetalShaderType shaderType, MTL::Buffer* buffer, size_t offset, uint32 index);
     void SetTexture(MTL::RenderCommandEncoder* renderCommandEncoder, MetalShaderType shaderType, MTL::Texture* texture, uint32 index);
     void SetSamplerState(MTL::RenderCommandEncoder* renderCommandEncoder, MetalShaderType shaderType, MTL::SamplerState* samplerState, uint32 index);
+    void DeclareResidency(MTL::RenderCommandEncoder* renderCommandEncoder, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stages);
 
 	MTL::CommandBuffer* GetCommandBuffer();
 	MTL::RenderCommandEncoder* GetTemporaryRenderCommandEncoder(MTL::RenderPassDescriptor* renderPassDescriptor);
@@ -578,6 +583,9 @@ private:
 
 	// State
 	MetalState m_state;
+
+	
+	std::unordered_map<const void*, uint32> m_encoderResidency;
 
 	// GPU capture
 	bool m_captureFrame = false;

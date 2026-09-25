@@ -53,7 +53,12 @@ struct GamesListView: View {
                             switch result {
                             case .success(let urls):
                                 for url in urls {
-                                    try? FileManager.default.copyItem(at: url, to: .romsURL.appendingPathComponent(url.lastPathComponent))
+                                    switch url.getUTType {
+                                    case .zip:
+                                        try? ZIPExtractor.extract(zipURL: url, to: .romsURL)
+                                    default:
+                                        try? FileManager.default.copyItem(at: url, to: .romsURL.appendingPathComponent(url.lastPathComponent))
+                                    }
                                 }
                                 
                                 gamesList.loadGames() // forgot this when uploading to the damn AppStore, i'm stupid :sob: -stossy11
@@ -109,5 +114,16 @@ struct GamesListView: View {
             .padding(.top)
         }
         .padding(.horizontal)
+    }
+}
+
+extension URL {
+    var getUTType: UTType? {
+        do {
+            let resourceValues = try self.resourceValues(forKeys: [.contentTypeKey])
+            return resourceValues.contentType
+        } catch {
+            return nil
+        }
     }
 }

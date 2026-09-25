@@ -363,18 +363,6 @@ uint32 memory_getVirtualOffsetFromPointer(void* ptr)
 	return (uint32)((uint8*)ptr - (uint8*)memory_base);
 }
 
-uint8* memory_getPointerFromVirtualOffset(uint32 virtualOffset)
-{	
-	return memory_base + virtualOffset;
-}
-
-uint8* memory_getPointerFromVirtualOffsetAllowNull(uint32 virtualOffset)
-{	
-	if( virtualOffset == MPTR_NULL )
-		return nullptr;
-	return memory_getPointerFromVirtualOffset(virtualOffset);
-}
-
 // write access
 void memory_writeDouble(uint32 address, double vf)
 {
