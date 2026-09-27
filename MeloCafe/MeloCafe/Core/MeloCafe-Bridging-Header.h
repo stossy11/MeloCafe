@@ -68,6 +68,8 @@ void CemuRun();
 
 void CemuShutdown();
 
+void CemuRefreshGames();
+
 GameInfo* CemuGetAllGames(bool includeUpdates, bool includeDLC, int* outCount);
 
 void CemuFreeGameList(GameInfo* list, int count);

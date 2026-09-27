@@ -392,7 +392,7 @@ void CemuInitialize(const char* execPath, const char* user_data_path, const char
     CafeSaveList::SetMLCPath(ActiveSettings::GetMlcPath());
     
     CafeTitleList::Initialize(ActiveSettings::GetUserDataPath("title_list_cache.xml"));
-    CafeTitleList::Refresh();
+    CafeTitleList::AddScanPath(ActiveSettings::GetUserDataPath("roms"));
     
     
     ExceptionHandler_Init();
@@ -513,6 +513,16 @@ GameIconResult CemuGetGameIcon(uint64 titleId) {
     return result;
 }
 
+
+void CemuRefreshGames()
+{
+    if (!gInitialized)
+        return;
+
+    CafeTitleList::Refresh();
+    while (CafeTitleList::IsScanning())
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
 
 GameInfo* CemuGetAllGames(bool includeUpdates, bool includeDLC, int* outCount)
 {

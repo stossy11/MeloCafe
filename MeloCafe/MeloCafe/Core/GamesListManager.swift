@@ -8,7 +8,7 @@
 import SwiftUI
 import Combine
 
-struct GameInfoSwift: Codable, Identifiable {
+nonisolated struct GameInfoSwift: Codable, Identifiable, Sendable {
     let id: UInt64
     let title: String
     let path: String
@@ -16,28 +16,52 @@ struct GameInfoSwift: Codable, Identifiable {
     var bundleId: String? = nil
 }
 
+@MainActor
 class GamesManager: ObservableObject {
 
     @Published var games: [GameInfoSwift] = []
     @Published var startedEmulation: Bool = false
+    @Published private(set) var isLoading = false
 
-    private let fileManager = FileManager.default
+    private var libraryTask: Task<Void, Never>?
+    private var refreshRequested = false
+    private var preparingGame = false
     public static let shared = GamesManager()
 
     private init() {
 
     }
 
-    func loadGames()  {
-        if let enumerator = fileManager.enumerator(at: .romsURL, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator {
-                _ = CemuManager.load(path: fileURL.path)
-            }
+    func loadGames() {
+        guard !startedEmulation else { return }
+        refreshRequested = true
+        guard libraryTask == nil else { return }
+        isLoading = true
+        libraryTask = Task {
+            repeat {
+                refreshRequested = false
+                let discovered = await Task.detached(priority: .userInitiated) {
+                    Self.scanGames()
+                }.value
+                games = discovered
+            } while refreshRequested
+            isLoading = false
+            libraryTask = nil
         }
+    }
 
+    func waitForLibrary() async {
+        await libraryTask?.value
+    }
+
+    nonisolated private static func scanGames() -> [GameInfoSwift] {
+        let start = Date()
+        CemuRefreshGames()
+        var games: [GameInfoSwift] = []
         var count: Int32 = 0
 
         if let gamesPtr = CemuGetAllGames(false, false, &count) {
+            defer { CemuFreeGameList(gamesPtr, count) }
             let gamesArray = UnsafeBufferPointer(start: gamesPtr, count: Int(count))
 
             for game in gamesArray {
@@ -48,36 +72,48 @@ class GamesManager: ObservableObject {
                     icon: Data()
                 )
                 gameInfo.icon = CemuManager.loadGameIcon(game.titleId) ?? Data()
-                self.games.append(gameInfo)
+                games.append(gameInfo)
             }
-
-            CemuFreeGameList(gamesPtr, count)
-        } else {
-            print("No games found.")
         }
+        print("Library scan: \(games.count) games in \(Date().timeIntervalSince(start)) seconds")
+        return games
     }
 
     func loadGame(_ game: String, _ load: Bool = false) {
-        let mgr = ControllerManager.shared
-        mgr.isRunning = true
-        let id = CemuManager.load(path: game, load: true)
+        prepareForGame {
+            let mgr = ControllerManager.shared
+            mgr.isRunning = true
+            let id = CemuManager.load(path: game, load: true)
 
-        if load {
-            if id > 0 {
-                _ = CemuManager.loadTitle(titleId: id)
+            if load {
+                if id > 0 {
+                    _ = CemuManager.loadTitle(titleId: id)
+                }
             }
-        }
 
-        CemuManager.run()
-        startedEmulation = true
+            CemuManager.run()
+            self.startedEmulation = true
+        }
     }
 
     func loadGame(_ game: GameInfoSwift) {
-        let mgr = ControllerManager.shared
-        mgr.isRunning = true
-        _ = CemuManager.loadTitle(titleId: game.id)
-        CemuManager.run()
-        startedEmulation = true
+        prepareForGame {
+            let mgr = ControllerManager.shared
+            mgr.isRunning = true
+            _ = CemuManager.loadTitle(titleId: game.id)
+            CemuManager.run()
+            self.startedEmulation = true
+        }
+    }
+
+    private func prepareForGame(_ launch: @escaping () -> Void) {
+        guard !preparingGame, !startedEmulation else { return }
+        preparingGame = true
+        Task {
+            defer { preparingGame = false }
+            await waitForLibrary()
+            launch()
+        }
     }
 
     func handleDeepLink(_ url: URL) {
@@ -90,7 +126,7 @@ class GamesManager: ObservableObject {
 
             Task {
 
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                await waitForLibrary()
 
                 if let query = idMatch ?? nameMatch {
 
@@ -106,27 +142,30 @@ class GamesManager: ObservableObject {
             }
 
         case "gameInfo":
-            var games = self.games
+            Task {
+                await waitForLibrary()
+                var games = self.games
 
-            if games.count >= 1 {
-                games[0].bundleId = Bundle.main.bundleIdentifier
-            }
-
-            for index in games.indices {
-                let icon = UIImage(data: games[index].icon)
-
-                if let image = icon?.jpegData(compressionQuality: 0.5) {
-                    games[index].icon = image
+                if games.count >= 1 {
+                    games[0].bundleId = Bundle.main.bundleIdentifier
                 }
-            }
 
-            guard let urlscheme = components.queryItems?.first(where: { $0.name == "scheme" })?.value,
-                  let data = try? JSONEncoder().encode(games) else { return }
+                for index in games.indices {
+                    let icon = UIImage(data: games[index].icon)
 
-            let encoded = data.base64urlEncodedString()
-            let scheme = url.scheme ?? "melocafe"
-            if let returnURL = URL(string: "\(urlscheme)://\(scheme)?games=\(encoded)") {
-                UIApplication.shared.open(returnURL)
+                    if let image = icon?.jpegData(compressionQuality: 0.5) {
+                        games[index].icon = image
+                    }
+                }
+
+                guard let urlscheme = components.queryItems?.first(where: { $0.name == "scheme" })?.value,
+                      let data = try? JSONEncoder().encode(games) else { return }
+
+                let encoded = data.base64urlEncodedString()
+                let scheme = url.scheme ?? "melocafe"
+                if let returnURL = URL(string: "\(urlscheme)://\(scheme)?games=\(encoded)") {
+                    await UIApplication.shared.open(returnURL)
+                }
             }
         default:
             return

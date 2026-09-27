@@ -30,7 +30,7 @@ class CemuManager {
         }
     }
 
-    static func loadGameIcon(_ titleId: UInt64) -> Data? {
+    nonisolated static func loadGameIcon(_ titleId: UInt64) -> Data? {
         var iconResult = CemuGetGameIcon(titleId)
 
         guard let iconData = iconResult.data, iconResult.size > 0 else {
@@ -156,4 +156,3 @@ public extension ProcessInfo {
         }
     }
 }
-

@@ -73,14 +73,17 @@ class ContentHostingController: UIHostingController<AnyView> {
         guard !ready else { return }
         ready = true
         
-        if !pendingURLs.isEmpty {
-            let urls = pendingURLs
-            pendingURLs.removeAll()
-            open(urls)
-        } else if let gameCString = getenv("GAME") {
-            let gameID = String(cString: gameCString)
-            if let game = gameManager.games.first(where: { $0.id == UInt64(gameID) || $0.title == gameID }) {
-                gameManager.loadGame(game)
+        Task {
+            if !pendingURLs.isEmpty {
+                let urls = pendingURLs
+                pendingURLs.removeAll()
+                open(urls)
+            } else if let gameCString = getenv("GAME") {
+                let gameID = String(cString: gameCString)
+                await gameManager.waitForLibrary()
+                if let game = gameManager.games.first(where: { $0.id == UInt64(gameID) || $0.title == gameID }) {
+                    gameManager.loadGame(game)
+                }
             }
         }
     }

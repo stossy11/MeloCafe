@@ -40,6 +40,11 @@ struct GamesListView: View {
                 default: grid
                 }
             }
+            .overlay {
+                if gamesList.isLoading && gamesList.games.isEmpty {
+                    ProgressView("Loading games…")
+                }
+            }
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .graphicPacks(game: let game):
@@ -69,6 +74,7 @@ struct GamesListView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .disabled(gamesList.isLoading)
                 }
             }
         }

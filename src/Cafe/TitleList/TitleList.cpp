@@ -308,6 +308,12 @@ bool CafeTitleList::RefreshWorkerThread()
 		}
 		sTLListPending.clear();
 	}
+	// Finish writing the cache before Refresh() can join this worker while holding sTLMutex.
+	if (sTLCacheDirty)
+	{
+		StoreCacheFile();
+		sTLCacheDirty = false;
+	}
 	sTLMutex.lock();
 	sTLRefreshWorkerActive = false;
 	// send notification that scanning finished
@@ -317,11 +323,6 @@ bool CafeTitleList::RefreshWorkerThread()
 	for (auto& it : sTLCallbackList)
 		it.cb(&evt, it.ctx);
 	sTLMutex.unlock();
-	if (sTLCacheDirty)
-	{
-		StoreCacheFile();
-		sTLCacheDirty = false;
-	}
 	return true;
 }
 
