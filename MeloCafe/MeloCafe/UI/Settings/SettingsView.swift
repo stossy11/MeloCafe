@@ -55,6 +55,7 @@ struct AppIcon: Identifiable {
 
 struct SettingsView: View {
     @ObservedObject private var controllerManager: ControllerManager = .shared
+    @ObservedObject private var cemuManager: CemuManager = .shared
     @StateObject private var configManager: ConfigManager = .shared
     @EnvironmentObject private var gameManager: GamesManager
     
@@ -423,6 +424,46 @@ struct SettingsView: View {
                 }
                 
                 Section {
+                    Toggle("Auto Enable JIT on Launch", isOn: $cemuManager.autoEnableJIT)
+                        .disabled(cemuManager.isEnablingJIT || (cemuManager.jitUnavailableReason != nil && !cemuManager.autoEnableJIT))
+                    Button {
+                        FileImporterManager.shared.importFiles(types: [.propertyList]) { result in
+                            handlePairingFileImport(result)
+                        }
+                    } label: {
+                        HStack {
+                            Text("Select Pairing File")
+                            Spacer()
+                            Text(cemuManager.pairingFileName ?? "None")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .disabled(cemuManager.isEnablingJIT)
+                    Button(cemuManager.jitError == nil ? "Enable JIT Now" : "Retry Enabling JIT") {
+                        Task {
+                            try? await cemuManager.enableJIT()
+                        }
+                    }
+                    .disabled(cemuManager.isEnablingJIT || cemuManager.pairingFileName == nil || cemuManager.jitUnavailableReason != nil)
+                    HStack {
+                        if cemuManager.isEnablingJIT {
+                            ProgressView()
+                        }
+                        Text(cemuManager.jitStatus)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let message = cemuManager.jitUnavailableReason ?? cemuManager.jitError {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("JIT")
+                }
+
+                Section {
                     HStack {
                         Text("In memoriam of 'Lily'")
                             .font(.system(.footnote, design: .monospaced))
@@ -438,6 +479,21 @@ struct SettingsView: View {
         }
     }
     
+    private func handlePairingFileImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else {
+                return
+            }
+            try cemuManager.importPairingFile(url)
+        } catch {
+            let pickerError = error as NSError
+            if pickerError.domain == "FileImporterManager", pickerError.code == 2 {
+                return
+            }
+            AppAlerts.showSyncAlert(title: "Pairing File", message: error.localizedDescription)
+        }
+    }
+
     private func handleImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):

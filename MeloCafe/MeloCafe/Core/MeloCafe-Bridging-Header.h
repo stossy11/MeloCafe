@@ -8,6 +8,7 @@
 #define MeloCafeHeader
 #include <UIKit/UIKit.h>
 #include "Controller/CemuController.h"
+#include "JITHelperClient.h"
 #include "../../../src/config/CemuConfigWrapper.h"
 #include "../../../src/config/GraphicPackWrapper.h"
 #include "../../../src/gui/uikit/EmulatedUSBDevices.h"
@@ -77,6 +78,7 @@ GameIconResult CemuGetGameIcon(unsigned long long titleId);
 void Cemu_FreeGameIcon(GameIconResult* icon);
 
 bool CemuInitJIT();
+bool CemuIsJITInitialized();
 
 extern size_t g_available_memory;
 

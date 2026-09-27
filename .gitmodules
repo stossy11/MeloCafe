@@ -25,3 +25,6 @@
 [submodule "dependencies/xbyak_aarch64"]
 	path = dependencies/xbyak_aarch64
 	url = https://github.com/fujitsu/xbyak_aarch64
+[submodule "dependencies/StikJIT"]
+	path = dependencies/StikJIT
+	url = https://github.com/StephenDev0/StikJIT.git

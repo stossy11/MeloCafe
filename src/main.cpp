@@ -571,10 +571,23 @@ void CemuRun()
 }
 
 
-bool CemuInitJIT() {
-    PPCRecompiler_Init26();
+bool CemuInitJIT()
+{
+    try
+    {
+        return PPCRecompiler_Init26();
+    }
+    catch (const std::exception& error)
+    {
+        cemuLog_log(LogType::Force, "JIT initialization failed: {}", error.what());
+        return false;
+    }
 }
 
+bool CemuIsJITInitialized()
+{
+    return PPCRecompilerInitialized();
+}
 
 void CemuShutdown()
 {

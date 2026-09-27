@@ -46,13 +46,17 @@ To have MeloCafe show inside SideStore (or AltStore), You must re-install it:
 - Now You can Refresh **MeloCafe** and Update it without needing a computer.
 
 #### 5. Enable JIT (Optional)
-- Enable JIT using your preferred method, on iOS 26 [StikDebug](https://github.com/StephenDev0/StikDebug) is required.
+- On iOS 17.4 or later, use the JIT section at the bottom of Settings to import this device's StikJIT-compatible remote pairing `.plist` file and turn on **Auto Enable JIT on Launch**.
+- Enable Developer Mode, connect LocalDevVPN, and install MeloCafe with debugging (`get-task-allow`) enabled. The first activation may download a developer disk image. Use **Enable JIT Now** to activate without relaunching.
+- External tools such as [StikDebug](https://github.com/StephenDev0/StikDebug) remain available.
 
 
 
 ## Build Instructions
 
 To compile Cemu yourself on Windows, Linux or macOS, view [BUILD.md](/BUILD.md).
+
+For the iOS JIT helper, initialize submodules with `git submodule update --init --recursive`, set the project's `MELOCAFE_BUNDLE_IDENTIFIER`, and sign MeloCafe and JITEnabler with the same team. The helper needs its own provisioning profile; preserve `PlugIns/JITEnabler.appex` when packaging or re-signing the app.
 
 ## Issues
 

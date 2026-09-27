@@ -175,6 +175,7 @@ void PPCRecompiler_allocateRange(uint32 startAddress, uint32 size);
 void PPCRecompiler_invalidateRange(uint32 startAddr, uint32 endAddr);
 void PPCRecompiler_invalidateRangeFromICBI(uint32 startAddr, uint32 endAddr);
 bool PPCRecompiler_isDualMapJITEnabled();
+bool PPCRecompilerInitialized();
 bool PPCRecompiler_Init26();
 DualMapRegion PPCRecompiler_allocateDualMap(size_t size);
 void PPCRecompiler_freeDualMap(const DualMapRegion& region);

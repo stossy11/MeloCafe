@@ -61,9 +61,6 @@ class ContentHostingController: UIHostingController<AnyView> {
         super.viewDidLoad()
         installJITTrapHandler()
         configureJITEnvironment()
-        if !checkAppEntitlement("get-task-allow") {
-            CemuConfigWrapper.shared().cpuMode = .multicoreInterpreter
-        }
         setupEmulation()
     }
     
@@ -73,14 +70,17 @@ class ContentHostingController: UIHostingController<AnyView> {
         guard !ready else { return }
         ready = true
         
-        if !pendingURLs.isEmpty {
-            let urls = pendingURLs
-            pendingURLs.removeAll()
-            open(urls)
-        } else if let gameCString = getenv("GAME") {
-            let gameID = String(cString: gameCString)
-            if let game = gameManager.games.first(where: { $0.id == UInt64(gameID) || $0.title == gameID }) {
-                gameManager.loadGame(game)
+        Task {
+            await CemuManager.shared.enableJITOnLaunchIfNeeded()
+            if !pendingURLs.isEmpty {
+                let urls = pendingURLs
+                pendingURLs.removeAll()
+                open(urls)
+            } else if let gameCString = getenv("GAME") {
+                let gameID = String(cString: gameCString)
+                if let game = gameManager.games.first(where: { $0.id == UInt64(gameID) || $0.title == gameID }) {
+                    gameManager.loadGame(game)
+                }
             }
         }
     }
@@ -113,11 +113,14 @@ class ContentHostingController: UIHostingController<AnyView> {
         
         cemuConfig.logFlag = 0
         cemuConfig.advancedPPCLogging = false
+        if !checkAppEntitlement("get-task-allow") {
+            cemuConfig.cpuMode = .multicoreInterpreter
+        }
         gameManager.loadGames()
         setupMetalViews()
         setupControllers()
         
-        if CPUMode(cemuConfig.cpuMode) != .interpreter {
+        if !CemuManager.shared.autoEnableJIT, MCJITIsDebugged(), CPUMode(cemuConfig.cpuMode) != .interpreter {
             CemuInitJIT()
         }
     }

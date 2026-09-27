@@ -13,6 +13,22 @@
 		4E36B5962F824F31009A2F1A /* Cemu.framework in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4E1700952F5BB42D00B278B3 /* Cemu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F3FC2F599094003D2387 /* Metal.framework */; };
 		4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */; };
+		1A9698A0603A3B79422CFACD /* JITRequestHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5208F0A046BAC478AD1692EA /* JITRequestHandler.swift */; };
+		1E8852614D27E72BCF485E10 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = EC114368C4DF1F8FB7CF4706 /* main.m */; };
+		7CEDCA7AF5050269B87A1B21 /* BundledScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F1B2E5095FB92FA95E4A0E /* BundledScript.swift */; };
+		6BB3A4885EDABFED0FBBF44A /* DDISession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4448BEA8942D5834BA9AB011 /* DDISession.swift */; };
+		2DBD471A2733C00FD63CBF73 /* DeveloperDiskImageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34FF1BF1004CA61A4C73D4AF /* DeveloperDiskImageService.swift */; };
+		7CE1F40FCAA17DEA9BFE9892 /* EndpointProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09C1B8D5E5787B6EC7E9EED2 /* EndpointProbe.swift */; };
+		8D0156DB045D12B714A6299F /* IdeviceFFI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F07B316D69CF5F0481C485C /* IdeviceFFI.swift */; };
+		FAF197AFB93EA3EF6AF00E4A /* JITSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C395D71100431088F0E0D459 /* JITSession.swift */; };
+		1A5A8825B6EB417B70BAB870 /* ProcessInfo+TXM.swift in Sources */ = {isa = PBXBuildFile; fileRef = E869D8B1A08BD0514FD29E8B /* ProcessInfo+TXM.swift */; };
+		49112EF6B82A123A95A4341B /* ScriptRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45457497B78206C09D5DA380 /* ScriptRunner.swift */; };
+		EC87F785B41F068CEEA0BD90 /* StikJIT.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CCECEE0B95E2351410462C /* StikJIT.swift */; };
+		C984BEEAC9F37F0D718601E4 /* StikJITError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17096E62AEAC81B78EC3CF81 /* StikJITError.swift */; };
+		C1F60DE8E0312460B40AC67D /* SynchronousDDIDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CDBB19B0D47F6C49B5DF94 /* SynchronousDDIDownloader.swift */; };
+		0E66BA97CB9680961642F0FD /* universal.js in Resources */ = {isa = PBXBuildFile; fileRef = 9306F6BFD8C2E9100A0C4A2B /* universal.js */; };
+		42EE4986C512D4F3C62080AE /* legacy.js in Resources */ = {isa = PBXBuildFile; fileRef = 450C3C0A17049BAD1AC7E901 /* legacy.js */; };
+		4290B8C58DF6B7DAEC7D5931 /* Embed JITEnabler */ = {isa = PBXBuildFile; fileRef = 79860EC78C9815AEA0931E9F /* JITEnabler.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,6 +53,13 @@
 			remoteGlobalIDString = 4513260BE3F7F4A2E650E76D;
 			remoteInfo = ZERO_CHECK;
 		};
+		4B1DD8DDA9085355F650B359 /* JIT proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4E1B36CF2F5924AF00D151B0;
+			proxyType = 1;
+			remoteGlobalIDString = 23DF9F037F39CE3D7796E59E;
+			remoteInfo = JITEnabler;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -51,6 +74,17 @@
 			name = "Embed Libraries";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		10DDFA24C33D64414D69F408 /* Embed JIT Extension */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4290B8C58DF6B7DAEC7D5931 /* Embed JITEnabler */,
+			);
+			name = "Embed JIT Extension";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +93,23 @@
 		4E95F3FC2F599094003D2387 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		4E95F4372F5A950A003D2387 /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		4E95F4392F5A950F003D2387 /* TouchController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = TouchController.framework; path = System/Library/Frameworks/TouchController.framework; sourceTree = SDKROOT; };
+		5208F0A046BAC478AD1692EA /* JITRequestHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "JITRequestHandler.swift"; path = "JITEnabler/JITRequestHandler.swift"; sourceTree = SOURCE_ROOT; };
+		EC114368C4DF1F8FB7CF4706 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = "main.m"; path = "JITEnabler/main.m"; sourceTree = SOURCE_ROOT; };
+		E0F1B2E5095FB92FA95E4A0E /* BundledScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "BundledScript.swift"; path = "../dependencies/StikJIT/Sources/BundledScript.swift"; sourceTree = SOURCE_ROOT; };
+		4448BEA8942D5834BA9AB011 /* DDISession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "DDISession.swift"; path = "../dependencies/StikJIT/Sources/DDISession.swift"; sourceTree = SOURCE_ROOT; };
+		34FF1BF1004CA61A4C73D4AF /* DeveloperDiskImageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "DeveloperDiskImageService.swift"; path = "../dependencies/StikJIT/Sources/DeveloperDiskImageService.swift"; sourceTree = SOURCE_ROOT; };
+		09C1B8D5E5787B6EC7E9EED2 /* EndpointProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "EndpointProbe.swift"; path = "../dependencies/StikJIT/Sources/EndpointProbe.swift"; sourceTree = SOURCE_ROOT; };
+		8F07B316D69CF5F0481C485C /* IdeviceFFI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "IdeviceFFI.swift"; path = "../dependencies/StikJIT/Sources/IdeviceFFI.swift"; sourceTree = SOURCE_ROOT; };
+		C395D71100431088F0E0D459 /* JITSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "JITSession.swift"; path = "JITEnabler/JITSession.swift"; sourceTree = SOURCE_ROOT; };
+		E869D8B1A08BD0514FD29E8B /* ProcessInfo+TXM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ProcessInfo+TXM.swift"; path = "../dependencies/StikJIT/Sources/ProcessInfo+TXM.swift"; sourceTree = SOURCE_ROOT; };
+		45457497B78206C09D5DA380 /* ScriptRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ScriptRunner.swift"; path = "../dependencies/StikJIT/Sources/ScriptRunner.swift"; sourceTree = SOURCE_ROOT; };
+		A4CCECEE0B95E2351410462C /* StikJIT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "StikJIT.swift"; path = "../dependencies/StikJIT/Sources/StikJIT.swift"; sourceTree = SOURCE_ROOT; };
+		17096E62AEAC81B78EC3CF81 /* StikJITError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "StikJITError.swift"; path = "../dependencies/StikJIT/Sources/StikJITError.swift"; sourceTree = SOURCE_ROOT; };
+		39CDBB19B0D47F6C49B5DF94 /* SynchronousDDIDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SynchronousDDIDownloader.swift"; path = "../dependencies/StikJIT/Sources/SynchronousDDIDownloader.swift"; sourceTree = SOURCE_ROOT; };
+		9306F6BFD8C2E9100A0C4A2B /* universal.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "universal.js"; path = "../dependencies/StikJIT/Resources/universal.js"; sourceTree = SOURCE_ROOT; };
+		450C3C0A17049BAD1AC7E901 /* legacy.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "legacy.js"; path = "../dependencies/StikJIT/Resources/legacy.js"; sourceTree = SOURCE_ROOT; };
+		5B8B45E09424889C43CB3847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = JITEnabler/Info.plist; sourceTree = SOURCE_ROOT; };
+		79860EC78C9815AEA0931E9F /* JITEnabler.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = JITEnabler.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -116,6 +167,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C29F717FE7190033156A62C5 /* JIT Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -133,6 +191,7 @@
 			children = (
 				4E1700292F5BB19300B278B3 /* cemuMain.xcodeproj */,
 				4E1B36D92F5924AF00D151B0 /* MeloCafe */,
+				39D5028C62085D70B70BE14F /* JITEnabler files */,
 				4EE53AF12F596CDF008E8A2A /* Frameworks */,
 				4E1B36D82F5924AF00D151B0 /* Products */,
 			);
@@ -142,6 +201,7 @@
 			isa = PBXGroup;
 			children = (
 				4E1B36D72F5924AF00D151B0 /* MeloCafe.app */,
+				79860EC78C9815AEA0931E9F /* JITEnabler.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -156,6 +216,29 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		39D5028C62085D70B70BE14F /* JITEnabler files */ = {
+			isa = PBXGroup;
+			children = (
+				5208F0A046BAC478AD1692EA /* JITRequestHandler.swift */,
+				EC114368C4DF1F8FB7CF4706 /* main.m */,
+				E0F1B2E5095FB92FA95E4A0E /* BundledScript.swift */,
+				4448BEA8942D5834BA9AB011 /* DDISession.swift */,
+				34FF1BF1004CA61A4C73D4AF /* DeveloperDiskImageService.swift */,
+				09C1B8D5E5787B6EC7E9EED2 /* EndpointProbe.swift */,
+				8F07B316D69CF5F0481C485C /* IdeviceFFI.swift */,
+				C395D71100431088F0E0D459 /* JITSession.swift */,
+				E869D8B1A08BD0514FD29E8B /* ProcessInfo+TXM.swift */,
+				45457497B78206C09D5DA380 /* ScriptRunner.swift */,
+				A4CCECEE0B95E2351410462C /* StikJIT.swift */,
+				17096E62AEAC81B78EC3CF81 /* StikJITError.swift */,
+				39CDBB19B0D47F6C49B5DF94 /* SynchronousDDIDownloader.swift */,
+				9306F6BFD8C2E9100A0C4A2B /* universal.js */,
+				450C3C0A17049BAD1AC7E901 /* legacy.js */,
+				5B8B45E09424889C43CB3847 /* Info.plist */,
+			);
+			name = JITEnabler;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -167,11 +250,13 @@
 				4E1B36D42F5924AF00D151B0 /* Frameworks */,
 				4E1B36D52F5924AF00D151B0 /* Resources */,
 				4E1B371B2F592B6F00D151B0 /* Embed Libraries */,
+				10DDFA24C33D64414D69F408 /* Embed JIT Extension */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				4E91D2AD2FAF201B00353E63 /* PBXTargetDependency */,
+				469F197FE6E9C1792A0CCCFC /* JIT dependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4E1B36D92F5924AF00D151B0 /* MeloCafe */,
@@ -183,6 +268,17 @@
 			productName = MeloCafe;
 			productReference = 4E1B36D72F5924AF00D151B0 /* MeloCafe.app */;
 			productType = "com.apple.product-type.application";
+		};
+		23DF9F037F39CE3D7796E59E /* JITEnabler */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 265C23854727CB0180B252F5 /* JIT configurations */;
+			buildPhases = (34CCA739D8F28704D7C02FBD /* JIT Sources */, C29F717FE7190033156A62C5 /* JIT Frameworks */, 64EDFC3F7EC689FFF047EB69 /* JIT Resources */, );
+			buildRules = ();
+			dependencies = ();
+			name = JITEnabler;
+			productName = JITEnabler;
+			productReference = 79860EC78C9815AEA0931E9F /* JITEnabler.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -224,6 +320,7 @@
 			projectRoot = "";
 			targets = (
 				4E1B36D62F5924AF00D151B0 /* MeloCafe */,
+				23DF9F037F39CE3D7796E59E /* JITEnabler */,
 			);
 		};
 /* End PBXProject section */
@@ -253,6 +350,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		64EDFC3F7EC689FFF047EB69 /* JIT Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0E66BA97CB9680961642F0FD /* universal.js in Resources */,
+				42EE4986C512D4F3C62080AE /* legacy.js in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -260,6 +366,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		34CCA739D8F28704D7C02FBD /* JIT Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A9698A0603A3B79422CFACD /* JITRequestHandler.swift in Sources */,
+				1E8852614D27E72BCF485E10 /* main.m in Sources */,
+				7CEDCA7AF5050269B87A1B21 /* BundledScript.swift in Sources */,
+				6BB3A4885EDABFED0FBBF44A /* DDISession.swift in Sources */,
+				2DBD471A2733C00FD63CBF73 /* DeveloperDiskImageService.swift in Sources */,
+				7CE1F40FCAA17DEA9BFE9892 /* EndpointProbe.swift in Sources */,
+				8D0156DB045D12B714A6299F /* IdeviceFFI.swift in Sources */,
+				FAF197AFB93EA3EF6AF00E4A /* JITSession.swift in Sources */,
+				1A5A8825B6EB417B70BAB870 /* ProcessInfo+TXM.swift in Sources */,
+				49112EF6B82A123A95A4341B /* ScriptRunner.swift in Sources */,
+				EC87F785B41F068CEEA0BD90 /* StikJIT.swift in Sources */,
+				C984BEEAC9F37F0D718601E4 /* StikJITError.swift in Sources */,
+				C1F60DE8E0312460B40AC67D /* SynchronousDDIDownloader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -271,6 +397,11 @@
 			name = ZERO_CHECK;
 			targetProxy = 4E91D2AC2FAF201B00353E63 /* PBXContainerItemProxy */;
 		};
+		469F197FE6E9C1792A0CCCFC /* JIT dependency */ = {
+			isa = PBXTargetDependency;
+			target = 23DF9F037F39CE3D7796E59E /* JITEnabler */;
+			targetProxy = 4B1DD8DDA9085355F650B359 /* JIT proxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -278,6 +409,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				MELOCAFE_BUNDLE_IDENTIFIER = "com.-yournamehere-.MeloCafe";
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -342,6 +474,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				MELOCAFE_BUNDLE_IDENTIFIER = "com.-yournamehere-.MeloCafe";
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -440,7 +573,7 @@
 				OTHER_CFLAGS = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-Wl,-lc++abi";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.-yournamehere-.MeloCafe";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MELOCAFE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -500,7 +633,7 @@
 				OTHER_CFLAGS = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-Wl,-lc++abi";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.-yournamehere-.MeloCafe";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MELOCAFE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -510,6 +643,68 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "MeloCafe/Core/MeloCafe-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		15C238BF93E2E36F4B4CCCCA /* JIT Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JITEnabler/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(SRCROOT)/../dependencies/StikJIT/idevice";
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = "$(inherited) -Wl,-hidden-lidevice_ffi -framework JavaScriptCore -framework Network -framework Security -framework CFNetwork -framework SystemConfiguration -framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MELOCAFE_BUNDLE_IDENTIFIER).JITEnabler";
+				PRODUCT_MODULE_NAME = JITEnabler;
+				PRODUCT_NAME = JITEnabler;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/../dependencies/StikJIT/idevice $(SRCROOT)/../dependencies/StikJIT/iokit";
+				SWIFT_OBJC_BRIDGING_HEADER = MeloCafe/Core/JITHelperClient.h;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1BA21EEA7D5CEF40F437C39A /* JIT Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JITEnabler/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(SRCROOT)/../dependencies/StikJIT/idevice";
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = "$(inherited) -Wl,-hidden-lidevice_ffi -framework JavaScriptCore -framework Network -framework Security -framework CFNetwork -framework SystemConfiguration -framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MELOCAFE_BUNDLE_IDENTIFIER).JITEnabler";
+				PRODUCT_MODULE_NAME = JITEnabler;
+				PRODUCT_NAME = JITEnabler;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/../dependencies/StikJIT/idevice $(SRCROOT)/../dependencies/StikJIT/iokit";
+				SWIFT_OBJC_BRIDGING_HEADER = MeloCafe/Core/JITHelperClient.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -532,6 +727,15 @@
 			buildConfigurations = (
 				4E1B36E32F5924B000D151B0 /* Debug */,
 				4E1B36E42F5924B000D151B0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		265C23854727CB0180B252F5 /* JIT configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15C238BF93E2E36F4B4CCCCA /* JIT Debug */,
+				1BA21EEA7D5CEF40F437C39A /* JIT Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

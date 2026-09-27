@@ -22,6 +22,7 @@ class GamesManager: ObservableObject {
     @Published var startedEmulation: Bool = false
 
     private let fileManager = FileManager.default
+    private var preparingGame = false
     public static let shared = GamesManager()
 
     private init() {
@@ -58,26 +59,44 @@ class GamesManager: ObservableObject {
     }
 
     func loadGame(_ game: String, _ load: Bool = false) {
-        let mgr = ControllerManager.shared
-        mgr.isRunning = true
-        let id = CemuManager.load(path: game, load: true)
+        prepareForGame {
+            let mgr = ControllerManager.shared
+            mgr.isRunning = true
+            let id = CemuManager.load(path: game, load: true)
 
-        if load {
-            if id > 0 {
-                _ = CemuManager.loadTitle(titleId: id)
+            if load {
+                if id > 0 {
+                    _ = CemuManager.loadTitle(titleId: id)
+                }
             }
-        }
 
-        CemuManager.run()
-        startedEmulation = true
+            CemuManager.run()
+            self.startedEmulation = true
+        }
     }
 
     func loadGame(_ game: GameInfoSwift) {
-        let mgr = ControllerManager.shared
-        mgr.isRunning = true
-        _ = CemuManager.loadTitle(titleId: game.id)
-        CemuManager.run()
-        startedEmulation = true
+        prepareForGame {
+            let mgr = ControllerManager.shared
+            mgr.isRunning = true
+            _ = CemuManager.loadTitle(titleId: game.id)
+            CemuManager.run()
+            self.startedEmulation = true
+        }
+    }
+
+    private func prepareForGame(_ launch: @escaping () -> Void) {
+        guard !preparingGame, !startedEmulation else { return }
+        preparingGame = true
+        Task {
+            defer { preparingGame = false }
+            do {
+                try await CemuManager.shared.prepareJITForGame()
+                launch()
+            } catch {
+                AppAlerts.showSyncAlert(title: "JIT Unavailable", message: error.localizedDescription)
+            }
+        }
     }
 
     func handleDeepLink(_ url: URL) {
