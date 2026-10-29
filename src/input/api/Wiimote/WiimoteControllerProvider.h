@@ -1,11 +1,14 @@
 #pragma once
 
 #include "input/motion/MotionHandler.h"
+#include "input/motion/WiiMotionSampleClock.h"
 #include "input/api/Wiimote/WiimoteDevice.h"
 #include "input/api/Wiimote/WiimoteMessages.h"
 
 #include "input/api/ControllerProvider.h"
 #include "input/api/ControllerState.h"
+
+#include "input/api/Wiimote/WiiExtensionProtocol.h"
 
 #include <list>
 #include <variant>
@@ -35,6 +38,7 @@ public:
 	bool is_registered_device(size_t index);
 	void set_rumble(size_t index, bool state);
 	void request_status(size_t index);
+	void calibrate_gyro(size_t index, bool start);
 	void set_led(size_t index, size_t player_index);
 
 	uint32 get_packet_delay(size_t index);
@@ -47,9 +51,11 @@ public:
 		uint8 battery_level = 0;
 
 		glm::vec3 m_acceleration{}, m_prev_acceleration{};
+        glm::vec<3, uint16> m_raw_acceleration{};
 		float m_roll = 0;
 
-		std::chrono::high_resolution_clock::time_point m_last_motion_timestamp{};
+		WiiMotionSampleClock m_motion_clock;
+        bool m_gravity_initialized = false;
 		MotionSample motion_sample{};
 		WiiUMotionHandler motion_handler{};
 
@@ -65,6 +71,8 @@ public:
 			PositionVisibility m_positionVisibility;
 			glm::vec2 middle {};
 			float distance = 0;
+            uint64_t sequence = 0;
+            std::chrono::steady_clock::time_point timestamp{};
 			std::pair<sint32, sint32> indices{ 0,1 };
 		}ir_camera{};
 
@@ -90,7 +98,10 @@ private:
 			: device(std::move(device)) {}
 
 		WiimoteDevicePtr device;
+        WiiExtensionProtocol extensions;
+        std::atomic_int gyro_calibration_request{0};
 		std::atomic_bool rumble = false;
+		std::atomic_bool disconnected = false;
 
 		std::shared_mutex mutex;
 		WiimoteState state{};
@@ -119,11 +130,9 @@ private:
 
 	void rotate_ir(WiimoteState& wiimote_state);
 	void calculate_ir_position(WiimoteState& wiimote_state);
-	int parse_ir(WiimoteState& wiimote_state, const uint8* data);
+	int parse_ir(WiimoteState& wiimote_state, const uint8* data, IRMode mode);
 
-	void request_extension(size_t index);
-	void detect_motion_plus(size_t index);
-	void set_motion_plus(size_t index, bool state);
+	void sync_extensions(WiimoteState& state, const WiiExtensionProtocol& extensions);
 
 	void update_report_type(size_t index);
 };

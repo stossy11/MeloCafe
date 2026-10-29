@@ -8,6 +8,26 @@ WiimoteController::WiimoteController(size_t player_index)
 {
 }
 
+WPADDeviceType WiimoteController::get_device_type() const
+{
+#ifdef SUPPORTS_WIIMOTE
+    std::shared_lock lock(m_mutex);
+    for (const auto& controller : m_controllers)
+    {
+        if (const auto wiimote = std::dynamic_pointer_cast<NativeWiimoteController>(controller))
+        {
+            const auto extension = wiimote->get_extension();
+            const bool nunchuck = extension == NativeWiimoteController::Nunchuck;
+            const bool classic = extension == NativeWiimoteController::Classic;
+            if (wiimote->is_mpls_attached() && m_mpls_enabled)
+                return nunchuck ? kWAPDevMPLSFreeStyle : classic ? kWAPDevMPLSClassic : kWAPDevMPLS;
+            return nunchuck ? kWAPDevFreestyle : classic ? kWAPDevClassic : kWAPDevCore;
+        }
+    }
+#endif
+    return m_device_type;
+}
+
 void WiimoteController::set_device_type(WPADDeviceType device_type)
 {
 	m_device_type = device_type;
@@ -16,7 +36,11 @@ void WiimoteController::set_device_type(WPADDeviceType device_type)
 
 bool WiimoteController::is_mpls_attached()
 {
-	return m_device_type == kWAPDevMPLS || m_device_type == kWAPDevMPLSClassic || m_device_type == kWAPDevMPLSFreeStyle;
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote()) return native->is_mpls_attached();
+#endif
+	const auto type = get_device_type();
+	return type == kWAPDevMPLS || type == kWAPDevMPLSClassic || type == kWAPDevMPLSFreeStyle;
 }
 
 uint32 WiimoteController::get_emulated_button_flag(uint32 id) const
@@ -88,12 +112,26 @@ glm::vec2 WiimoteController::get_axis() const
 
 glm::vec2 WiimoteController::get_rotation() const
 {
-	return {};
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        if (const auto classic = std::get_if<ClassicData>(&state.m_extension)) return classic->right_axis;
+    }
+#endif
+    return {};
 }
 
 glm::vec2 WiimoteController::get_trigger() const
 {
-	return {};
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        if (const auto classic = std::get_if<ClassicData>(&state.m_extension)) return classic->trigger;
+    }
+#endif
+    return {};
 }
 
 void WiimoteController::load(const pugi::xml_node& node)

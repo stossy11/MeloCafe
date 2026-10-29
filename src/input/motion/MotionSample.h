@@ -127,12 +127,19 @@ public:
 		m_accMagnitude = sqrtf(m_acc[0] * m_acc[0] + m_acc[1] * m_acc[1] + m_acc[2] * m_acc[2]);
 	}
 
-    // Convert the physical iOS sensor convention to the game's horizontal
+    // Convert the physical Wii/iOS sensor convention to the game's horizontal
     // convention at the output boundary. Keep fusion in a proper rotation frame.
     MotionSample withReversedHorizontalAxes() const
     {
         auto result = *this;
         result.m_outputAxes = m_outputAxes == OutputAxes::GamePad ? OutputAxes::Original : OutputAxes::GamePad;
+        return result;
+    }
+
+    MotionSample withWiiRemoteAxes() const
+    {
+        auto result = *this;
+        result.m_outputAxes = OutputAxes::WiiRemote;
         return result;
     }
 
@@ -214,6 +221,12 @@ public:
             // pitch stays unchanged, and the basis remains orthonormal.
             for (int i : {1, 2, 3, 6}) mtx[i] = -mtx[i];
         }
+        else if (m_outputAxes == OutputAxes::WiiRemote)
+        {
+            // Wii KPAD uses a different pitch/roll convention from GamePad.
+            // Conjugate by diag(1, 1, -1), matching the velocity/angle signs.
+            for (int i : {2, 5, 6, 7}) mtx[i] = -mtx[i];
+        }
 	}
 
 	static float calculateAccAcceleration(float prevAcc[3], float currentAcc[3])
@@ -254,11 +267,12 @@ private:
 	float m_accAcceleration{};
 	float m_orientation[3]{};
 	float m_q[4]{};
-    enum class OutputAxes { Original, GamePad };
+    enum class OutputAxes { Original, GamePad, WiiRemote };
     OutputAxes m_outputAxes = OutputAxes::Original;
     bool reverseAxis(int axis) const
     {
-        return m_outputAxes == OutputAxes::GamePad && axis != 0;
+        return m_outputAxes == OutputAxes::GamePad ? axis != 0 :
+            m_outputAxes == OutputAxes::WiiRemote && axis != 2;
     }
 	// calculated values
 	float m_accMagnitude{};

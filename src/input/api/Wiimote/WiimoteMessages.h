@@ -208,17 +208,23 @@ struct NunchuchCalibration : Calibration
 
 struct MotionPlusData
 {
-	Calibration calibration{};
-
-	glm::vec3 orientation; // yaw, roll, pitch
-	bool slow_roll = false;
-	bool slow_pitch = false;
-	bool slow_yaw = false;
-	bool extension_connected = false;
+    glm::vec3 angular_velocity{}; // rad/s, right-handed pitch, roll, yaw
+    glm::vec3 angles{}; // integrated KPAD pitch, yaw, roll; 1 = one revolution
+    bool last_report_gyro = false;
+    std::array<uint16_t, 3> raw{}; // yaw, roll, pitch
+    std::array<bool, 3> slow{};
+    bool extension_connected = false;
+    bool factory_calibrated = false;
+    bool integrated = false;
+    uint64_t sequence = 0;
+    float calibration_progress = 1;
+    bool zero_calibrated = false;
 };
 
 struct NunchuckData
 {
+    uint64_t sequence = 0;
+    glm::vec<3, uint16> raw_acceleration{};
 	glm::vec3 acceleration{}, prev_acceleration{};
 	NunchuchCalibration calibration{};
 
@@ -233,6 +239,7 @@ struct NunchuckData
 
 struct ClassicData
 {
+    uint64_t sequence = 0;
 	glm::vec2 left_axis{};
 	glm::vec<2, uint8> left_raw_axis{};
 

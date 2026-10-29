@@ -149,6 +149,7 @@ option(ENABLE_DISCORD_RPC "Enables the Discord Rich Presence feature" ON)
 option(ENABLE_IOS_NATIVE_RECORDING "Enables lightweight in-app Metal recording on iOS" ON)
 
 if (IOS)
+	set(SUPPORTS_WIIMOTE ON)
 	set(ENABLE_OPENGL OFF CACHE BOOL "OpenGL is not supported on iOS" FORCE)
 	set(ENABLE_VULKAN ON CACHE BOOL "Vulkan is enabled for MeloCafe on iOS" FORCE)
 	set(ENABLE_METAL ON CACHE BOOL "Metal is required on iOS" FORCE)

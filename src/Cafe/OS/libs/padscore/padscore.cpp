@@ -6,6 +6,9 @@
 #include "Cafe/OS/libs/coreinit/coreinit_SystemInfo.h"
 #include "WindowSystem.h"
 #include "input/InputManager.h"
+#ifdef SUPPORTS_WIIMOTE
+#include "input/api/Wiimote/NativeWiimoteController.h"
+#endif
 
 // KPAD
 
@@ -64,9 +67,15 @@ namespace padscore
 			MEMPTR<void> connectCallback;
 			MEMPTR<void> sampling_callback;
 			MEMPTR<void> dpd_callback;
+            MEMPTR<void> mpls_callback;
+            int mpls_request = -1;
+            bool mpls_started = false;
+            std::chrono::steady_clock::time_point mpls_deadline{};
 			bool dpd_enabled = true;
 
 			bool disconnectCalled = false;
+			bool connectionReported = false;
+			WPADDeviceType lastExtensionType = kWAPDevNotFound;
 
 			BtnRepeat btn_repeat{};
 		} controller_data[InputManager::kMaxWPADControllers] = {};
@@ -129,6 +138,30 @@ typedef struct
 
 static_assert(sizeof(WPADInfo_t) == 0x18); // unsure
 
+// Keep synchronous and asynchronous capability queries consistent with the
+// native controller. In particular, an active built-in MotionPlus occupies the
+// extension bus even when there is nothing plugged into the external port.
+static void FillWPADInfo(WPADInfo_t& info, WPADController& controller, uint32 channel)
+{
+    info = {};
+    info.batteryLevel = WPADBatteryLevel::FULL;
+    info.led = static_cast<WPADLed>(1u << channel);
+    const auto type = controller.get_device_type();
+    info.attach = controller.is_mpls_attached() || type == kWAPDevFreestyle || type == kWAPDevClassic;
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = controller.get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        info.attach = (state.flags & kExtensionConnected) != 0 || state.m_motion_plus.has_value() || state.m_extension.index() != 0;
+        info.dpd = state.ir_camera.mode != kIRDisabled;
+        info.speaker = (state.flags & 4) != 0;
+        info.lowBat = (state.flags & 1) != 0;
+        info.nearempty = info.lowBat;
+        info.led = static_cast<WPADLed>(state.flags >> 4);
+    }
+#endif
+}
+
 void padscoreExport_WPADGetInfoAsync(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
@@ -140,13 +173,7 @@ void padscoreExport_WPADGetInfoAsync(PPCInterpreter_t* hCPU)
 	{
 		if (const auto controller = InputManager::instance().get_wpad_controller(channel))
 		{
-			wpadInfo->dpd = FALSE;
-			wpadInfo->speaker = FALSE;
-			wpadInfo->attach = FALSE;
-			wpadInfo->lowBat = FALSE;
-			wpadInfo->nearempty = FALSE;
-			wpadInfo->batteryLevel = WPADBatteryLevel::FULL;
-			wpadInfo->led = WPADLed::CHAN0;
+			FillWPADInfo(*wpadInfo, *controller, channel);
 
 			if(callbackFunc != MPTR_NULL)
 				coreinitAsyncCallback_add(callbackFunc, 2, channel, (uint32)KPAD_ERROR::NONE);
@@ -230,13 +257,7 @@ void padscoreExport_WPADGetInfo(PPCInterpreter_t* hCPU)
 	{
 		if (const auto controller = InputManager::instance().get_wpad_controller(channel))
 		{
-			wpadInfo->dpd = FALSE;
-			wpadInfo->speaker = FALSE;
-			wpadInfo->attach = FALSE;
-			wpadInfo->lowBat = FALSE;
-			wpadInfo->nearempty = FALSE;
-			wpadInfo->batteryLevel = WPADBatteryLevel::FULL;
-			wpadInfo->led = WPADLed::CHAN0;
+			FillWPADInfo(*wpadInfo, *controller, channel);
 
 			osLib_returnFromFunction(hCPU, WPAD_ERR_NONE);
 			return;
@@ -402,6 +423,7 @@ void padscoreExport_WPADSetExtensionCallback(PPCInterpreter_t* hCPU)
 
 	const auto old_callback = padscore::g_padscore.controller_data[channel].extension_callback;
 	padscore::g_padscore.controller_data[channel].extension_callback = callback;
+	padscore::g_padscore.controller_data[channel].lastExtensionType = kWAPDevNotFound;
 	osLib_returnFromFunction(hCPU, old_callback.GetMPTR());
 }
 
@@ -421,6 +443,10 @@ void padscoreExport_KPADSetConnectCallback(PPCInterpreter_t* hCPU)
 
 	const auto old_callback = padscore::g_padscore.controller_data[channel].connectCallback;
 	padscore::g_padscore.controller_data[channel].connectCallback = callback;
+	padscore::g_padscore.controller_data[channel].disconnectCalled = false;
+	padscore::g_padscore.controller_data[channel].connectionReported = false;
+	if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+		controller->m_status = WPADController::ConnectCallbackStatus::ReportConnect;
 	osLib_returnFromFunction(hCPU, old_callback.GetMPTR());
 }
 
@@ -657,7 +683,7 @@ namespace padscore
 
 	WPADStatus WPADIsMplsAttached(sint32 index, uint32be* attached, void* callback)
 	{
-		if (index >= kKPADMaxControllers)
+		if (index < 0 || index >= kKPADMaxControllers || !attached)
 			return WPADStatus::NoController;
 
 		const auto controller = InputManager::instance().get_wpad_controller(index);
@@ -668,6 +694,176 @@ namespace padscore
 
 		return WPADStatus::Success;
 	}
+
+    // Public homebrew ABI reference: devkitPro/wut include/padscore/kpad.h.
+    // HLE owns its motion state, so no guest work buffer is needed.
+    void KPADSetMplsWorkarea(void*) {}
+
+    bool ValidChannel(sint32 channel) { return channel >= 0 && channel < InputManager::kMaxWPADControllers; }
+
+    void KPADSetControlMplsCallback(sint32 channel, MEMPTR<void> callback)
+    {
+        if (ValidChannel(channel)) g_padscore.controller_data[channel].mpls_callback = callback;
+    }
+
+    sint32 KPADGetMplsStatus(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return 0;
+        const auto controller = InputManager::instance().get_wpad_controller(channel);
+        if (!controller || !controller->m_mpls_enabled || !controller->is_mpls_attached()) return 0;
+        const auto type = controller->get_device_type();
+        return type == kWAPDevMPLSFreeStyle ? 5 : type == kWAPDevMPLSClassic ? 7 : 4;
+    }
+
+    void KPADEnableMpls(sint32 channel, sint32 mode)
+    {
+        if (!ValidChannel(channel) || (mode != 0 && mode != 4 && mode != 5 && mode != 7)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+        {
+            controller->m_mpls_enabled = mode != 0;
+            controller->set_data_format(mode ? kDataFormat_MPLS : controller->get_default_data_format());
+        }
+        auto& state = g_padscore.controller_data[channel];
+        state.mpls_request = mode;
+        state.mpls_started = false;
+        state.mpls_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    }
+
+    void KPADDisableMpls(sint32 channel) { KPADEnableMpls(channel, 0); }
+
+    sint32 WPADIsMplsIntegrated(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return -1;
+        const auto controller = InputManager::instance().get_wpad_controller(channel);
+        if (!controller) return -1;
+#ifdef SUPPORTS_WIIMOTE
+        if (const auto native = controller->get_native_wiimote())
+        {
+            const auto state = native->get_native_state();
+            return state.m_motion_plus && state.m_motion_plus->integrated;
+        }
+#endif
+        return 0;
+    }
+
+    void KPADStartMplsCalibration(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return;
+#ifdef SUPPORTS_WIIMOTE
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            if (const auto native = controller->get_native_wiimote()) native->calibrate_gyro(true);
+#endif
+    }
+
+    void KPADStopMplsCalibration(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return;
+#ifdef SUPPORTS_WIIMOTE
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            if (const auto native = controller->get_native_wiimote()) native->calibrate_gyro(false);
+#endif
+    }
+
+    float KPADWorkMplsCalibration(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return -1;
+#ifdef SUPPORTS_WIIMOTE
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            if (const auto native = controller->get_native_wiimote())
+            {
+                const auto state = native->get_native_state();
+                if (state.m_motion_plus) return state.m_motion_plus->calibration_progress;
+            }
+#endif
+        return -1;
+    }
+
+    void KPADSetMplsAngle(sint32 channel, float pitch, float yaw, float roll)
+    {
+        if (!ValidChannel(channel) || !std::isfinite(pitch) || !std::isfinite(yaw) || !std::isfinite(roll)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->SetMotionPlusAngle({pitch, yaw, roll});
+    }
+
+    void KPADSetMplsDirection(sint32 channel, const KPADMPDir_t* direction)
+    {
+        if (!ValidChannel(channel) || !direction) return;
+        const glm::mat3 matrix{
+            glm::vec3{direction->X.x, direction->X.y, direction->X.z},
+            glm::vec3{direction->Y.x, direction->Y.y, direction->Y.z},
+            glm::vec3{direction->Z.x, direction->Z.y, direction->Z.z}};
+        for (int column = 0; column < 3; ++column)
+            for (int row = 0; row < 3; ++row) if (!std::isfinite(matrix[column][row])) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->SetMotionPlusDirection(matrix);
+    }
+
+    void KPADSetMplsMagnification(sint32 channel, float pitch, float yaw, float roll)
+    {
+        if (!ValidChannel(channel) || !std::isfinite(pitch) || !std::isfinite(yaw) || !std::isfinite(roll)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->m_mpls_velocity_scale = {pitch, yaw, roll};
+    }
+
+    void KPADSetMplsDirReviseBase(sint32 channel, const KPADMPDir_t* base)
+    {
+        if (!ValidChannel(channel) || !base) return;
+        const glm::mat3 matrix{
+            glm::vec3{base->X.x, base->X.y, base->X.z},
+            glm::vec3{base->Y.x, base->Y.y, base->Y.z},
+            glm::vec3{base->Z.x, base->Z.y, base->Z.z}};
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->m_mpls_ir_heading.setBase(matrix);
+    }
+
+    void KPADEnableMplsDpdRevise(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->m_mpls_ir_heading.enabled = true;
+    }
+
+    void KPADDisableMplsDpdRevise(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->m_mpls_ir_heading.enabled = false;
+    }
+
+    sint32 KPADIsEnableMplsDpdRevise(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return 0;
+        const auto controller = InputManager::instance().get_wpad_controller(channel);
+        return controller && controller->m_mpls_ir_heading.enabled;
+    }
+
+    void KPADSetMplsDpdReviseParam(sint32 channel, float weight)
+    {
+        if (!ValidChannel(channel) || !std::isfinite(weight)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            controller->m_mpls_ir_heading.weight = std::clamp(weight, 0.0f, 1.0f);
+    }
+
+    void KPADGetMplsDpdReviseParam(sint32 channel, float32be* weight)
+    {
+        if (!ValidChannel(channel) || !weight) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+            *weight = controller->m_mpls_ir_heading.weight;
+    }
+
+    void KPADInitMplsDpdReviseParam(sint32 channel) { KPADSetMplsDpdReviseParam(channel, .05f); }
+
+    void KPADResetMpls(sint32 channel)
+    {
+        if (!ValidChannel(channel)) return;
+        if (const auto controller = InputManager::instance().get_wpad_controller(channel))
+        {
+            controller->SetMotionPlusAngle({});
+            controller->SetMotionPlusDirection(glm::mat3{1.0f});
+            controller->m_mpls_velocity_scale = glm::vec3{1.0f};
+            controller->m_mpls_ir_heading = {};
+        }
+    }
 
 	struct WPADAcc
 	{
@@ -692,6 +888,25 @@ namespace padscore
 	void TickFunction(PPCInterpreter_t* hCPU)
 	{
 		auto& instance = InputManager::instance();
+        // Complete MotionPlus requests on the emulation thread, including a
+        // bounded wait while a newly connected physical remote initializes.
+        for (sint32 channel = 0; channel < InputManager::kMaxWPADControllers; ++channel)
+        {
+            auto& state = g_padscore.controller_data[channel];
+            if (state.mpls_request < 0) continue;
+            if (!state.mpls_started)
+            {
+                state.mpls_started = true;
+                if (state.mpls_callback) PPCCoreCallback(state.mpls_callback, channel, 0);
+                continue;
+            }
+            const auto controller = instance.get_wpad_controller(channel);
+            const bool finished = !controller || state.mpls_request == 0 || controller->is_mpls_attached();
+            if (!finished && std::chrono::steady_clock::now() < state.mpls_deadline) continue;
+            const int result = finished ? 1 : state.mpls_request == 5 ? -2 : state.mpls_request == 7 ? -3 : -1;
+            state.mpls_request = -1;
+            if (state.mpls_callback) PPCCoreCallback(state.mpls_callback, channel, result);
+        }
 		// test for connected/disconnected controllers
 		for (auto i = 0; i < InputManager::kMaxWPADControllers; ++i)
 		{
@@ -710,6 +925,7 @@ namespace padscore
 					if (controller->m_status == WPADController::ConnectCallbackStatus::ReportDisconnect || controller->was_home_button_down()) // fixed!
 					{
 						controller->m_status = WPADController::ConnectCallbackStatus::ReportConnect;
+						g_padscore.controller_data[i].connectionReported = false;
 
 						cemuLog_log(LogType::InputAPI, "Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NO_CONTROLLER);
 						PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NO_CONTROLLER);
@@ -718,9 +934,17 @@ namespace padscore
 					else if (controller->m_status == WPADController::ConnectCallbackStatus::ReportConnect) 
 					{
 						controller->m_status = WPADController::ConnectCallbackStatus::None;
+						g_padscore.controller_data[i].connectionReported = true;
 						cemuLog_log(LogType::InputAPI, "Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NONE);
 						PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NONE);
 					}
+				}
+				else if (g_padscore.controller_data[i].connectionReported)
+				{
+					// Hot-unplug can remove the WPAD object entirely (including a BLE
+					// bridge loss), so there is no object left to carry m_status.
+					g_padscore.controller_data[i].connectionReported = false;
+					PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NO_CONTROLLER);
 				}
 			}
 		}
@@ -732,11 +956,14 @@ namespace padscore
 			{
 				if (const auto controller = instance.get_wpad_controller(i))
 				{
-					if (controller->m_extension_status == WPADController::ConnectCallbackStatus::ReportConnect)
+					const auto deviceType = controller->get_device_type();
+					if (controller->m_extension_status == WPADController::ConnectCallbackStatus::ReportConnect ||
+						g_padscore.controller_data[i].lastExtensionType != deviceType)
 					{
+						g_padscore.controller_data[i].lastExtensionType = deviceType;
 						controller->m_extension_status = WPADController::ConnectCallbackStatus::None;
 						cemuLog_log(LogType::InputAPI, "Calling WPADextensionCallback({})", i);
-						PPCCoreCallback(g_padscore.controller_data[i].extension_callback, i, controller->get_device_type());
+						PPCCoreCallback(g_padscore.controller_data[i].extension_callback, i, deviceType);
 					}
 				}
 			}
@@ -777,6 +1004,27 @@ namespace padscore
 		void RPLMapped() override
 		{
 			cafeExportRegister("padscore", WPADIsMplsAttached, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsWorkarea, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetControlMplsCallback, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADGetMplsStatus, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADEnableMpls, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADDisableMpls, LogType::InputAPI);
+            cafeExportRegister("padscore", WPADIsMplsIntegrated, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADStartMplsCalibration, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADStopMplsCalibration, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADWorkMplsCalibration, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsAngle, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsDirection, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsMagnification, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsDirReviseBase, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADEnableMplsDpdRevise, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADDisableMplsDpdRevise, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADIsEnableMplsDpdRevise, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADSetMplsDpdReviseParam, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADGetMplsDpdReviseParam, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADInitMplsDpdReviseParam, LogType::InputAPI);
+            cafeExportRegister("padscore", KPADResetMpls, LogType::InputAPI);
+
 			cafeExportRegister("padscore", WPADGetAccGravityUnit, LogType::InputAPI);
 
 			// wpad

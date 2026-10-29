@@ -210,6 +210,14 @@ struct SettingsView: View {
                 }
                 .environment(\.editMode, .constant(.active))
                 
+                Section {
+                    NavigationLink {
+                        WiiRemoteSettingsView()
+                    } label: {
+                        Label("Wii Remotes", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+
                 Section("Graphics") {
                     Picker("Renderer", selection: configManager.renderer) {
                         ForEach(Renderer.allCases, id: \.self) {

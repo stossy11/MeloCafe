@@ -34,6 +34,8 @@ public:
 
 	Extension get_extension() const;
 	bool is_mpls_attached() const;
+	void calibrate_gyro(bool start) { m_provider->calibrate_gyro(m_index, start); }
+	WiimoteControllerProvider::WiimoteState get_native_state() const { return m_provider->get_state(m_index); }
 
 	ControllerState raw_state() override;
 

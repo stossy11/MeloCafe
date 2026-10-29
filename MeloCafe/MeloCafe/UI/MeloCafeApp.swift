@@ -11,6 +11,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         setenv("MVK_CONFIG_DEBUG", "0", 1)
         setenv("MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", "128", 1)
         CemuManager.initialize()
+        _ = WiiRemoteBridgeManager.shared
         return true
     }
 }
