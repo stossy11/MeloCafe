@@ -195,18 +195,12 @@ final class NativeController {
     private func updateMotion(from m: GCMotion) {
         var mo = GCBridgeMotionState()
         
-        let a = SIMD3<Float>(
-            Float(m.acceleration.x),
-            -Float(m.acceleration.y),
-            -Float(m.acceleration.z)
-        )
-        
-        let g = SIMD3<Float>(
-            Float(m.rotationRate.x),
-            -Float(m.rotationRate.z),
-            Float(m.rotationRate.y)
-        )
-        
+        let converted = DeviceMotionCoordinates.convert(
+            gyro: SIMD3(Float(m.rotationRate.x), Float(m.rotationRate.y), Float(m.rotationRate.z)),
+            acceleration: SIMD3(Float(m.acceleration.x), Float(m.acceleration.y), Float(m.acceleration.z)),
+            quarterTurns: 0)
+        let a = converted.acceleration, g = converted.gyro
+
         mo.accelerometer = GCBridgeVec3(x: a.x, y: a.y, z: a.z)
         mo.gyroscope = GCBridgeVec3(x: g.x, y: g.y, z: g.z)
         

@@ -170,33 +170,20 @@ final class VirtualController {
         let ay = Float(m.gravity.y + m.userAcceleration.y)
         let az = Float(m.gravity.z + m.userAcceleration.z)
         
-        let a: SIMD3<Float>
-        let g: SIMD3<Float>
-        
+        let quarterTurns: Int
         switch deviceOrientation {
-        case .portrait:
-            a = SIMD3(  ax, -ay, -az)
-            g = SIMD3(  gx, -gy, -gz)
-        case .landscapeRight:
-            a = SIMD3(  ay,  ax, -az)
-            g = SIMD3(  gy,  gx, -gz)
-        case .portraitUpsideDown:
-            a = SIMD3( -ax,  ay, -az)
-            g = SIMD3( -gx,  gy, -gz)
-        case .landscapeLeft:
-            a = SIMD3( -ay, -ax, -az)
-            g = SIMD3( -gy, -gx, -gz)
-        case .unknown, .faceUp, .faceDown:
-            a = SIMD3(  ax, -ay, -az)
-            g = SIMD3(  gx, -gy, -gz)
-        @unknown default:
-            return
+        case .portrait, .unknown, .faceUp, .faceDown: quarterTurns = 0
+        case .landscapeLeft: quarterTurns = 1
+        case .landscapeRight: quarterTurns = -1
+        case .portraitUpsideDown: quarterTurns = 2
+        @unknown default: return
         }
-        
-        
+        let converted = DeviceMotionCoordinates.convert(
+            gyro: SIMD3(gx, gy, gz), acceleration: SIMD3(ax, ay, az), quarterTurns: quarterTurns)
+        let g = converted.gyro, a = converted.acceleration
         mo.gyroscope     = GCBridgeVec3(x: g.x, y: g.y, z: g.z)
         mo.accelerometer = GCBridgeVec3(x: a.x, y: a.y, z: a.z)
-        
+
         mo.orientation = GCBridgeVec3(x: 0, y: 0, z: 0)
         mo.quaternion  = GCBridgeQuat(w: 1, x: 0, y: 0, z: 0)
         mo.timestamp = m.timestamp

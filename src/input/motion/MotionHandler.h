@@ -1,5 +1,6 @@
 #pragma once
 #include "Mahony.h"
+#include <algorithm>
 #include "MotionSample.h"
 
 // utility class to translate external motion input (DSU, SDL GamePad sensors) into the values expected by VPAD API (and maybe others in the future)
@@ -10,7 +11,7 @@ public:
 	void processMotionSample(
 		float deltaTime,
 		float gx, float gy, float gz,
-		float accx, float accy, float accz)
+		float accx, float accy, float accz, bool learnGyroBias = true)
 	{
 		m_gyro[0] = gx;
 		m_gyro[1] = gy;
@@ -22,12 +23,19 @@ public:
 		m_acc[1] = accy;
 		m_acc[2] = accz;
 		// integrate acc and gyro samples into IMU
-		m_imu.updateIMU(deltaTime, gx, gy, gz, accx, accy, accz);
+		m_imu.updateIMU(deltaTime, gx, gy, gz, accx, accy, accz, learnGyroBias);
 
-		// get orientation from IMU
-		m_orientation[0] = _radToOrientation(-m_imu.getYawRadians()) - 0.50f;
-		m_orientation[1] = _radToOrientation(-m_imu.getPitchRadians()) - 0.50f;
-		m_orientation[2] = _radToOrientation(m_imu.getRollRadians());
+        // VPAD/KPAD angles are integrals of angular velocity, not Euler angles
+        // extracted from the fused attitude (which swap axes and wrap at poles).
+        float bias[3];
+        m_imu.getGyroBias(bias);
+        const float elapsed = std::clamp(deltaTime, 0.0f, 0.2f);
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            float rate = m_gyro[axis] - bias[axis];
+            if (std::abs(rate) < 0.012f) rate = 0;
+            m_orientation[axis] += _radToOrientation(axis == 2 ? rate : -rate) * elapsed;
+        }
 	}
 
 	MotionSample getMotionSample()

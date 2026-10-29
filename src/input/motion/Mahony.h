@@ -14,13 +14,13 @@ public:
 	}
 
 	// gx, gy, gz are in radians/sec
-	void updateIMU(float deltaTime, float gx, float gy, float gz, float ax, float ay, float az)
+	void updateIMU(float deltaTime, float gx, float gy, float gz, float ax, float ay, float az, bool learnGyroBias = true)
 	{
 		Vector3f av(ax, ay, az);
 		Vector3f gv(gx, gy, gz);
 		if (deltaTime > 0.2f)
 			deltaTime = 0.2f; // dont let stutter mess up the internal state
-		updateGyroBias(gx, gy, gz);
+		if (learnGyroBias) updateGyroBias(gx, gy, gz);
 		gv.x -= m_gyroBias[0];
 		gv.y -= m_gyroBias[1];
 		gv.z -= m_gyroBias[2];
