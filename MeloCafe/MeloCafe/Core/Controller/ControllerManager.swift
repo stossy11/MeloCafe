@@ -10,6 +10,18 @@ import GameController
 import Combine
 import SwiftUI
 
+enum ControllerMotionSource: String, CaseIterable {
+    case controller
+    case device
+
+    var name: String {
+        switch self {
+        case .controller: return "Controller"
+        case .device: return "This Device"
+        }
+    }
+}
+
 struct ControllerEntry: Identifiable {
     let id: UUID
     let name: String
@@ -42,6 +54,15 @@ final class ControllerManager: ObservableObject {
     
     @Published private(set) var controllers: [ControllerEntry] = []
     @Published private(set) var allControllers: [ControllerEntry] = []
+    @Published var motionSource: ControllerMotionSource = ControllerMotionSource(
+        rawValue: UserDefaults.standard.string(forKey: "controllerMotionSource") ?? ""
+    ) ?? .controller {
+        didSet {
+            guard motionSource != oldValue else { return }
+            UserDefaults.standard.set(motionSource.rawValue, forKey: "controllerMotionSource")
+            synchronizeIfRunning()
+        }
+    }
     var isRunning = false
     
     private init() {
@@ -116,7 +137,7 @@ final class ControllerManager: ObservableObject {
         
         for entry in controllers {
             if entry.isVirtual { virtualController.registerWithCore(entry.controllerType) }
-            else { entry.nativeController?.registerWithCore(entry.controllerType) }
+            else { entry.nativeController?.registerWithCore(entry.controllerType, motionSource: motionSource) }
         }
         
         var handles: [UnsafeMutableRawPointer?] = controllers.compactMap { entry in

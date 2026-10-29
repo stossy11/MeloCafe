@@ -12,6 +12,9 @@ import CoreHaptics
 final class NativeController {
     let gc: GCController
     private(set) var coreHandle: UnsafeMutableRawPointer?
+    nonisolated private let deviceMotion: DeviceMotionSource
+    private let motionConsumerID = UUID()
+    private var motionSource: ControllerMotionSource = .controller
     private var hapticEngine: CHHapticEngine?
     private var hapticPlayer: CHHapticAdvancedPatternPlayer?
     nonisolated(unsafe) private var attachmentGeneration: UInt64 = 0
@@ -25,6 +28,7 @@ final class NativeController {
     
     init(gc: GCController) {
         self.gc = gc
+        deviceMotion = .shared
         gc.handlerQueue = .main
         setupHaptics()
     }
@@ -34,6 +38,7 @@ final class NativeController {
     }
     
     public func detach() {
+        deviceMotion.stop(for: motionConsumerID)
         gc.extendedGamepad?.valueChangedHandler = nil
         gc.motion?.valueChangedHandler = nil
         
@@ -61,15 +66,16 @@ final class NativeController {
         stopHaptic()
     }
     
-    public func registerWithCore(_ controllerType: ControllerType) {
+    public func registerWithCore(_ controllerType: ControllerType, motionSource: ControllerMotionSource) {
         guard controllerType != .MAX else { return }
         self.controllerType = controllerType
-        if let handle = coreHandle {
+        if let handle = coreHandle, self.motionSource == motionSource {
             GCControllerBridge_configure(handle, controllerType.rawValue)
             return
         }
         
         detach()
+        self.motionSource = motionSource
         if let pad = gc.extendedGamepad { updateState(from: pad) }
         
         let ctx = Unmanaged.passRetained(self).toOpaque()
@@ -87,7 +93,14 @@ final class NativeController {
             return me._state
         }
         
-        if gc.motion?.hasRotationRate == true {
+        if motionSource == .device {
+            if deviceMotion.isAvailable {
+                desc.poll_motion = { ctx in
+                    let me = Unmanaged<NativeController>.fromOpaque(ctx!).takeUnretainedValue()
+                    return me.deviceMotion.sample()
+                }
+            }
+        } else if gc.motion?.hasRotationRate == true {
             desc.poll_motion = { ctx in NativeController.pollMotion(ctx) }
         }
         if gc.haptics != nil {
@@ -116,7 +129,9 @@ final class NativeController {
             self.updateState(from: pad)
         }
         
-        if let motion = gc.motion, motion.hasRotationRate {
+        if motionSource == .device {
+            deviceMotion.start(for: motionConsumerID)
+        } else if let motion = gc.motion, motion.hasRotationRate {
             motion.valueChangedHandler = { [weak self] m in
                 guard let self, self.coreHandle != nil,
                       self.attachmentGeneration == generation else { return }
