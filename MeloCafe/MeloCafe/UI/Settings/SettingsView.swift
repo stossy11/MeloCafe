@@ -254,6 +254,13 @@ struct SettingsView: View {
     private var inputTab: some View {
         Form {
             controllersSection
+            Section {
+                NavigationLink {
+                    WiiRemoteSettingsView()
+                } label: {
+                    Label("Wii Remotes", systemImage: "antenna.radiowaves.left.and.right")
+                }
+            }
             inputServicesSection
             emulatedDevicesSection
         }

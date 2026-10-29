@@ -1,12 +1,18 @@
 #include "input/api/Wiimote/WiimoteControllerProvider.h"
 #include "input/api/Wiimote/NativeWiimoteController.h"
 #include "input/api/Wiimote/WiimoteMessages.h"
+#include "input/api/Wiimote/WiiIRTracking.h"
+#include "input/motion/WiiMotionCoordinates.h"
 
 #ifdef HAS_HIDAPI
 #include "input/api/Wiimote/hidapi/HidapiWiimote.h"
 #endif
 #ifdef HAS_BLUEZ
 #include "input/api/Wiimote/l2cap/L2CapWiimote.h"
+#endif
+
+#if BOOST_OS_IOS
+#include "input/api/Wiimote/BLEWiimoteDevice.h"
 #endif
 
 #include <numbers>
@@ -58,14 +64,24 @@ std::vector<std::shared_ptr<ControllerBase>> WiimoteControllerProvider::get_cont
 	m_connectedDeviceMutex.lock();
 	auto devices = m_connectedDevices;
 	m_connectedDeviceMutex.unlock();
+#if BOOST_OS_IOS
+	const auto bleDevices = GetBLEWiimoteDevices();
+	devices.insert(devices.end(), bleDevices.begin(), bleDevices.end());
+#endif
 
 	std::scoped_lock lock(m_device_mutex);
 
+	// Device ownership changes only under the exclusive lock. Reader/writer threads
+	// flag disconnects instead of resetting shared_ptrs under a shared lock.
+	for (auto& wiimote : m_wiimotes)
+	{
+		if (wiimote.device && (wiimote.disconnected || !wiimote.device->is_connected()))
+			wiimote.device.reset();
+	}
+
 	for (auto& device : devices)
 	{
-		const auto writeable = device->write_data({kStatusRequest, 0x00});
-        if (!writeable)
-            continue;
+		if (!device->is_connected()) continue;
 
 		bool isDuplicate = false;
 		ssize_t lowestReplaceableIndex = -1;
@@ -86,6 +102,15 @@ std::vector<std::shared_ptr<ControllerBase>> WiimoteControllerProvider::get_cont
 		}
 		if (isDuplicate)
 			continue;
+		if (!device->write_data({kStatusRequest, 0x00})) continue;
+		// Do not let commands queued for a previous connection reach its replacement.
+		if (lowestReplaceableIndex != -1)
+		{
+			std::scoped_lock writerLock(m_writer_mutex);
+			std::erase_if(m_write_queue, [lowestReplaceableIndex](const auto& packet) {
+				return packet.first == static_cast<size_t>(lowestReplaceableIndex);
+			});
+		}
 		if (lowestReplaceableIndex != -1)
 			m_wiimotes.replace(lowestReplaceableIndex, std::make_unique<Wiimote>(device));
 		else
@@ -94,10 +119,20 @@ std::vector<std::shared_ptr<ControllerBase>> WiimoteControllerProvider::get_cont
 
 	std::vector<std::shared_ptr<ControllerBase>> result;
 	result.reserve(m_wiimotes.size());
+	std::vector<size_t> indices;
 	for (size_t i = 0; i < m_wiimotes.size(); ++i)
 	{
-		result.emplace_back(std::make_shared<NativeWiimoteController>(i));
+		if (m_wiimotes[i].device)
+			indices.push_back(i);
 	}
+#if BOOST_OS_IOS
+	// Sort the returned controller list, preserving each provider slot and gyro state.
+	std::stable_sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+		return std::find(bleDevices.begin(), bleDevices.end(), m_wiimotes[a].device) <
+			std::find(bleDevices.begin(), bleDevices.end(), m_wiimotes[b].device);
+	});
+#endif
+	for (const auto index : indices) result.emplace_back(std::make_shared<NativeWiimoteController>(index));
 
 	return result;
 }
@@ -105,7 +140,8 @@ std::vector<std::shared_ptr<ControllerBase>> WiimoteControllerProvider::get_cont
 bool WiimoteControllerProvider::is_connected(size_t index)
 {
 	std::shared_lock lock(m_device_mutex);
-	return index < m_wiimotes.size() && m_wiimotes[index].device;
+	return index < m_wiimotes.size() && m_wiimotes[index].device &&
+		!m_wiimotes[index].disconnected && m_wiimotes[index].device->is_connected();
 }
 
 bool WiimoteControllerProvider::is_registered_device(size_t index)
@@ -124,6 +160,12 @@ void WiimoteControllerProvider::set_rumble(size_t index, bool state)
 	lock.unlock();
 
 	send_packet(index, { kStatusRequest, 0x00 });
+}
+
+void WiimoteControllerProvider::calibrate_gyro(size_t index, bool start)
+{
+    std::shared_lock lock(m_device_mutex);
+    if (index < m_wiimotes.size()) m_wiimotes[index].gyro_calibration_request = start ? 1 : 2;
 }
 
 void WiimoteControllerProvider::request_status(size_t index)
@@ -197,535 +239,210 @@ void WiimoteControllerProvider::connectionThread()
 }
 
 
+void WiimoteControllerProvider::sync_extensions(WiimoteState& state, const WiiExtensionProtocol& extensions)
+{
+    const auto& mp = extensions.GetMotionPlus();
+    if (mp.active)
+    {
+        if (!state.m_motion_plus) { state.motion_handler = {}; state.m_motion_clock = {}; state.m_gravity_initialized = false; }
+        if (!state.m_motion_plus) state.m_motion_plus = MotionPlusData{};
+        auto& motion = *state.m_motion_plus;
+        motion.angular_velocity = {mp.calibratedVelocity[0], mp.calibratedVelocity[1], mp.calibratedVelocity[2]};
+        motion.calibration_progress = mp.calibrationProgress;
+        motion.zero_calibrated = mp.zeroCalibrated;
+        motion.raw = mp.raw;
+        motion.slow = mp.slow;
+        motion.extension_connected = mp.extensionConnected;
+        motion.factory_calibrated = mp.factoryCalibrated;
+        motion.integrated = mp.integrated;
+        motion.sequence = mp.sampleSequence;
+        motion.last_report_gyro = mp.lastReportWasGyro;
+    }
+    else
+    {
+        if (state.m_motion_plus) { state.motion_handler = {}; state.m_motion_clock = {}; state.m_gravity_initialized = false; }
+        state.m_motion_plus.reset();
+    }
+
+    if (extensions.GetExtension() == WiiExtensionProtocol::Extension::Nunchuck)
+    {
+        const auto& input = extensions.GetNunchuck();
+        const auto previous = std::get_if<NunchuckData>(&state.m_extension);
+        if (previous && previous->sequence == input.sequence) return;
+        const glm::vec3 previousAcc = previous ? previous->acceleration : glm::vec3{};
+        NunchuckData nunchuck;
+        nunchuck.sequence = input.sequence;
+        nunchuck.c = input.c; nunchuck.z = input.z;
+        nunchuck.axis = {input.stick[0], input.stick[1]};
+        nunchuck.raw_axis = {input.stickRaw[0], input.stickRaw[1]};
+        nunchuck.raw_acceleration = {input.accelerationRaw[0], input.accelerationRaw[1], input.accelerationRaw[2]};
+        nunchuck.acceleration = {input.acceleration[0], input.acceleration[1], input.acceleration[2]};
+        nunchuck.prev_acceleration = previousAcc;
+        float acc[3]{-nunchuck.acceleration.x, -nunchuck.acceleration.z, nunchuck.acceleration.y};
+        float zero[3]{}, identity[4]{1, 0, 0, 0};
+        nunchuck.motion_sample = MotionSample(acc, glm::length(nunchuck.acceleration - previousAcc), zero, zero, identity);
+        state.m_extension = nunchuck;
+    }
+    else if (extensions.GetExtension() == WiiExtensionProtocol::Extension::Classic)
+    {
+        const auto& input = extensions.GetClassic();
+        ClassicData classic;
+        classic.buttons = input.buttons;
+        classic.sequence = input.sequence;
+        classic.left_axis = {input.left[0], input.left[1]};
+        classic.right_axis = {input.right[0], input.right[1]};
+        classic.trigger = {input.trigger[0], input.trigger[1]};
+        state.m_extension = classic;
+    }
+    else state.m_extension = {};
+}
+
 void WiimoteControllerProvider::reader_thread()
 {
-	SetThreadName("Wiimote-reader");
-	std::chrono::steady_clock::time_point lastCheck = {};
-	while (m_running.load(std::memory_order_relaxed))
-	{
-		const auto now = std::chrono::steady_clock::now();
-		if (std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck) > std::chrono::milliseconds(500))
-		{
-			// check for new connected wiimotes
-			get_controllers();
-			lastCheck = std::chrono::steady_clock::now();
-		}
+    SetThreadName("Wiimote-reader");
+    std::chrono::steady_clock::time_point lastCheck{};
+    while (m_running.load(std::memory_order_relaxed))
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        if (now - lastCheck >= std::chrono::milliseconds(500))
+        {
+            get_controllers();
+            lastCheck = now;
+        }
+        bool receivedAnyPacket = false;
+        std::shared_lock lock(m_device_mutex);
+        for (size_t index = 0; index < m_wiimotes.size(); ++index)
+        {
+            auto& wiimote = m_wiimotes[index];
+            if (!wiimote.device || wiimote.disconnected) continue;
+            auto& extensions = wiimote.extensions;
+            const auto calibrationRequest = wiimote.gyro_calibration_request.exchange(0);
+            if (calibrationRequest == 1) extensions.StartGyroCalibration();
+            if (calibrationRequest == 2) extensions.StopGyroCalibration();
+            extensions.Tick(milliseconds);
+            const auto report = wiimote.device->read_data();
+            if (!report) { wiimote.disconnected = true; continue; }
+            auto commands = extensions.TakeCommands();
+            if (report->empty() && commands.empty()) continue;
+            receivedAnyPacket |= !report->empty();
 
-		bool receivedAnyPacket = false;
-		std::shared_lock lock(m_device_mutex);
-		for (size_t index = 0; index < m_wiimotes.size(); ++index)
-		{
-			auto& wiimote = m_wiimotes[index];
-			if (!wiimote.device)
-				continue;
+            std::shared_lock readLock(wiimote.mutex);
+            WiimoteState state = wiimote.state;
+            readLock.unlock();
+            const bool previousZero = state.m_motion_plus && state.m_motion_plus->zero_calibrated;
+            const bool previousExtended = state.m_extension.index() != 0 || state.m_motion_plus.has_value();
+            const auto previousSequence = state.m_motion_plus ? state.m_motion_plus->sequence : 0;
+            bool accelerationUpdated = false;
+            bool updateReport = false;
 
-			const auto read_data = wiimote.device->read_data();
-			if (!read_data)
-			{
-				wiimote.device.reset();
-				continue;
-			}
-			if (read_data->empty())
-				continue;
-			receivedAnyPacket = true;
-
-			std::shared_lock read_lock(wiimote.mutex);
-			WiimoteState new_state = wiimote.state;
-			read_lock.unlock();
-
-			bool update_report = false;
-
-			const uint8* data = read_data->data();
-			const auto id = (InputReportId)*data;
-			++data;
-			switch (id)
-			{
-			case kStatus:
-				{
-                    cemuLog_logDebug(LogType::Force,"WiimoteControllerProvider::read_thread: kStatus");
-					new_state.buttons = (*(uint16*)data) & (~0x60E0);
-					data += 2;
-					new_state.flags = *data;
-					++data;
-					data += 2; // skip zeroes
-					new_state.battery_level = *data;
-					++data;
-
-					new_state.ir_camera.mode = set_ir_camera(index, true);
-					if(!new_state.m_calibrated)
-						calibrate(index);
-
-					if(!new_state.m_motion_plus)
-						detect_motion_plus(index);
-
-					if (HAS_FLAG(new_state.flags, kExtensionConnected))
-					{
-                        cemuLog_logDebug(LogType::Force,"Extension flag is set");
-						if(new_state.m_extension.index() == 0)
-							request_extension(index);
-					}
-					else
-					{
-						new_state.m_extension = {};
-					}
-
-					update_report = true;
-				}
-				break;
-			case kRead:
-				{
-                    cemuLog_logDebug(LogType::Force,"WiimoteControllerProvider::read_thread: kRead");
-					new_state.buttons = (*(uint16*)data) & (~0x60E0);
-					data += 2;
-					const uint8 error_flag = *data & 0xF, size = (*data >> 4) + 1;
-					++data;
-
-					if (error_flag)
-					{
-
-						// 7 means that wiimote is already enabled or not available
-                        cemuLog_logDebug(LogType::Force,"Received error on data read {:#x}", error_flag);
-						continue;
-					}
-
-					auto address = *(betype<uint16>*)data;
-					data += 2;
-					if (address == (kRegisterCalibration & 0xFFFF))
-					{
-                        cemuLog_logDebug(LogType::Force,"Calibration received");
-
-						cemu_assert(size == 8);
-
-						new_state.m_calib_acceleration.zero.x = (uint16)*data << 2;
-						++data;
-						new_state.m_calib_acceleration.zero.y = (uint16)*data << 2;
-						++data;
-						new_state.m_calib_acceleration.zero.z = (uint16)*data << 2;
-						++data;
-						// --XXYYZZ
-						new_state.m_calib_acceleration.zero.x |= (*data >> 4) & 0x3; // 5|4 -> 1|0
-						new_state.m_calib_acceleration.zero.y |= (*data >> 2) & 0x3; // 3|4 -> 1|0
-						new_state.m_calib_acceleration.zero.z |= *data & 0x3;
-						++data;
-
-						new_state.m_calib_acceleration.gravity.x = (uint16)*data << 2;
-						++data;
-						new_state.m_calib_acceleration.gravity.y = (uint16)*data << 2;
-						++data;
-						new_state.m_calib_acceleration.gravity.z = (uint16)*data << 2;
-						++data;
-						new_state.m_calib_acceleration.gravity.x |= (*data >> 4) & 0x3; // 5|4 -> 1|0
-						new_state.m_calib_acceleration.gravity.y |= (*data >> 2) & 0x3; // 3|4 -> 1|0
-						new_state.m_calib_acceleration.gravity.z |= *data & 0x3;
-						++data;
-
-						new_state.m_calibrated = true;
-					}
-					else if (address == (kRegisterExtensionType & 0xFFFF))
-					{
-						if (size == 0xf)
-						{
-							cemuLog_logDebug(LogType::Force,"Extension type received but no extension connected");
-							continue;
-						}
-
-						cemu_assert(size == 6);
-						auto be_type = *(betype<uint64>*)data;
-						data += 6; // 48
-						be_type >>= 16;
-						be_type &= 0xFFFFFFFFFFFF;
-						switch (be_type.value())
-						{
-						case kExtensionNunchuck:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Nunchuck");
-							new_state.m_extension = NunchuckData{};
-							break;
-						case kExtensionClassic:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Classic");
-							new_state.m_extension = ClassicData{};
-							break;
-						case kExtensionClassicPro:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Classic Pro");
-							new_state.m_extension = ClassicData{};
-                            break;
-						case kExtensionGuitar:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Guitar");
-                            break;
-						case kExtensionDrums:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Drums");
-                            break;
-						case kExtensionBalanceBoard:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Balance Board");
-                            break;
-						case kExtensionMotionPlus:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: MotionPlus");
-							set_motion_plus(index, true);
-							new_state.m_motion_plus = MotionPlusData{};
-							break;
-						case kExtensionPartialyInserted:
-                            cemuLog_logDebug(LogType::Force,"Extension only partially inserted");
-							new_state.m_extension = {};
-							request_status(index);
-							break;
-						case kExtensionMotionPlusInactive:
-                            cemuLog_logDebug(LogType::Force,"Extension Type Received: Inactive MotionPlus");
-							break;
-						default:
-                            cemuLog_logDebug(LogType::Force,"Unknown extension: {:#x}", be_type.value());
-                            new_state.m_extension = {};
-							break;
-						}
-
-						if (new_state.m_extension.index() != 0)
-							send_read_packet(index, kRegisterMemory, kRegisterExtensionCalibration, 0x10);
-					}
-					else if (address == (kRegisterExtensionCalibration & 0xFFFF))
-					{
-						cemu_assert(size == 0x10);
-                        cemuLog_logDebug(LogType::Force,"Extension calibration received");
-						std::visit(
-							overloaded
-							{
-								[](auto)
-								{
-								},
-								[data](MotionPlusData& mp)
-								{
-									// TODO fix
-								},
-								[data](NunchuckData& nunchuck)
-								{
-									std::array<uint8, 14> zero{};
-									if (memcmp(zero.data(), data, zero.size()) == 0)
-									{
-                                        cemuLog_logDebug(LogType::Force,"Extension calibration data is zero");
-										return;
-									}
-
-									nunchuck.calibration.zero.x = (uint16)data[0] << 2;
-									nunchuck.calibration.zero.y = (uint16)data[1] << 2;
-									nunchuck.calibration.zero.z = (uint16)data[2] << 2;
-									// --XXYYZZ
-									nunchuck.calibration.zero.x |= (data[3] >> 4) & 0x3; // 5|4 -> 1|0
-									nunchuck.calibration.zero.y |= (data[3] >> 2) & 0x3; // 3|4 -> 1|0
-									nunchuck.calibration.zero.z |= data[3] & 0x3;
-
-									nunchuck.calibration.gravity.x = (uint16)data[4] << 2;;
-									nunchuck.calibration.gravity.y = (uint16)data[5] << 2;;
-									nunchuck.calibration.gravity.z = (uint16)data[6] << 2;;
-									// --XXYYZZ
-									nunchuck.calibration.gravity.x |= (data[7] >> 4) & 0x3; // 5|4 -> 1|0
-									nunchuck.calibration.gravity.y |= (data[7] >> 2) & 0x3; // 3|4 -> 1|0
-									nunchuck.calibration.gravity.z |= data[7] & 0x3;
-
-									nunchuck.calibration.max.x = data[8];
-									nunchuck.calibration.max.y = data[11];
-
-									nunchuck.calibration.min.x = data[9];
-									nunchuck.calibration.min.y = data[12];
-
-									nunchuck.calibration.center.x = data[10];
-									nunchuck.calibration.center.y = data[13];
-								}
-							}, new_state.m_extension);
-					}
-					else
-					{
-                        cemuLog_logDebug(LogType::Force,"Unhandled read data received");
-                        continue;
-					}
-
-					update_report = true;
-				}
-				break;
-            case kAcknowledge:
+            if (!report->empty())
+            {
+                const auto& b = *report;
+                const auto id = b[0];
+                const size_t expected = id == 0x20 ? 7 : id == 0x22 ? 5 : id == 0x30 ? 3 :
+                    id == 0x31 ? 6 : id == 0x32 ? 11 : id == 0x33 ? 18 : 22;
+                if (b.size() < expected) continue;
+                if (id != 0x3d) state.buttons = (uint16_t(b[1]) | uint16_t(b[2]) << 8) & ~0x60e0;
+                switch (id)
                 {
-                    new_state.buttons = *(uint16*)data & (~0x60E0);
-                    data += 2;
-                    const auto report_id = *data++;
-                    const auto error = *data++;
-                    if (error)
-                        cemuLog_logDebug(LogType::Force, "Error {:#x} from output report {:#x}", error, report_id);
+                case kStatus:
+                    state.flags = b[3]; state.battery_level = b[6];
+                    if (!state.m_calibrated) calibrate(index);
+                    extensions.Status((state.flags & kExtensionConnected) != 0, milliseconds);
+                    updateReport = true;
+                    break;
+                case kRead:
+                    if (!extensions.ReadReply(b, milliseconds) && (b[3] & 15) == 0 &&
+                        b[4] == 0 && b[5] == 0x16 && (b[3] >> 4) + 1 >= 10)
+                    {
+                        uint8_t checksum = 0x55;
+                        for (size_t i = 6; i < 15; ++i) checksum += b[i];
+                        if (checksum == b[15])
+                        {
+                            Calibration calibration;
+                            for (int axis = 0; axis < 3; ++axis)
+                            {
+                                calibration.zero[axis] = uint16_t(b[6 + axis]) << 2 | (b[9] >> (4 - axis * 2) & 3);
+                                calibration.gravity[axis] = uint16_t(b[10 + axis]) << 2 | (b[13] >> (4 - axis * 2) & 3);
+                            }
+                            if (glm::all(glm::greaterThan(calibration.gravity, calibration.zero)))
+                            { state.m_calib_acceleration = calibration; state.m_calibrated = true; }
+                        }
+                    }
+                    break;
+                case kDataCoreAcc: case kDataCoreAccIR: case kDataCoreAccExt: case kDataCoreAccIRExt:
+                {
+                    const uint8_t* data = b.data() + 1;
+                    parse_acceleration(state, data);
+                    accelerationUpdated = true;
+                    const auto gravity = glm::vec3(state.m_calib_acceleration.gravity) - glm::vec3(state.m_calib_acceleration.zero);
+                    const auto acceleration = state.m_acceleration / gravity;
+                    extensions.ObserveAcceleration({acceleration.x, acceleration.y, acceleration.z});
+                    if (id == kDataCoreAccIR) parse_ir(state, b.data() + 6, kExtendedIR);
+                    if (id == kDataCoreAccIRExt) parse_ir(state, b.data() + 6, kBasicIR);
+                    if (id == kDataCoreAccExt) extensions.Data(std::span(b).subspan(6), milliseconds);
+                    if (id == kDataCoreAccIRExt) extensions.Data(std::span(b).subspan(16), milliseconds);
                     break;
                 }
-			case kDataCore:
-				{
-					// 30 BB BB
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					data += 2;
-					break;
-				}
-			case kDataCoreAcc:
-				{
-					// 31 BB BB AA AA AA
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					parse_acceleration(new_state, data);
-					break;
-				}
-			case kDataCoreExt8:
-				{
-					// 32 BB BB EE EE EE EE EE EE EE EE
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					data += 2;
-					break;
-				}
-			case kDataCoreAccIR:
-				{
-					// 33 BB BB AA AA AA II II II II II II II II II II II II 
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					parse_acceleration(new_state, data);
-					data += parse_ir(new_state, data);
-					break;
-				}
-			case kDataCoreExt19:
-				{
-					// 34 BB BB EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE 
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					data += 2;
-					break;
-				}
-			case kDataCoreAccExt:
-				{
-					// 35 BB BB AA AA AA EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					parse_acceleration(new_state, data);
-					break;
-				}
-			case kDataCoreIRExt:
-				{
-					// 36 BB BB II II II II II II II II II II EE EE EE EE EE EE EE EE EE
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					data += 2;
-					break;
-				}
-			case kDataCoreAccIRExt:
-				{
-					// 37 BB BB AA AA AA II II II II II II II II II II EE EE EE EE EE EE
-					new_state.buttons = *(uint16*)data & (~0x60E0);
-					parse_acceleration(new_state, data);
-					data += parse_ir(new_state, data); // 10
-
-					std::visit(
-						overloaded
-						{
-							[](auto)
-							{
-							},
-							[data](MotionPlusData& mp) mutable
-							{
-								glm::vec<3, uint16> raw;
-								raw.x = *data;
-								++data;
-								raw.y = *data;
-								++data;
-								raw.z = *data;
-								++data;
-
-								raw.x |= (uint16)*data << 6; // 7|2 -> 13|8
-								mp.slow_yaw = *data & 2;
-								mp.slow_pitch = *data & 1;
-								++data;
-
-								raw.y |= (uint16)*data << 6; // 7|2 -> 13|8
-								mp.slow_roll = *data & 2;
-								mp.extension_connected = *data & 1;
-								++data;
-
-								raw.z |= (uint16)*data << 6; // 7|2 -> 13|8
-
-								auto& calib = mp.calibration;
-
-								glm::vec3 orientation = raw;
-								/*orientation -= calib.zero;
-	
-								Vector3<float> tmp = calib.gravity;
-								tmp -= calib.zero;
-								orientation /= tmp;*/
-
-								mp.orientation = orientation;
-                                cemuLog_logDebug(LogType::Force,"MotionPlus: {:.2f}, {:.2f} {:.2f}", mp.orientation.x, mp.orientation.y, mp.orientation.z);
-							},
-							[data](NunchuckData& nunchuck) mutable
-							{
-								nunchuck.raw_axis.x = *data;
-								++data;
-								nunchuck.raw_axis.y = *data;
-								++data;
-
-								glm::vec<3, uint16> raw_acc;
-								raw_acc.x = (uint16)*data << 2;
-								++data;
-								raw_acc.y = (uint16)*data << 2;
-								++data;
-								raw_acc.z = (uint16)*data << 2;
-								++data;
-								nunchuck.z = (*data & 1) == 0;
-								nunchuck.c = (*data & 2) == 0;
-
-								raw_acc.x |= (*data >> 2) & 0x3; // 3|2 -> 1|0
-								raw_acc.y |= (*data >> 4) & 0x3; // 5|4 -> 1|0
-								raw_acc.z |= (*data >> 6) & 0x3; // 7|6 -> 1|0
-
-								auto& calib = nunchuck.calibration;
-
-								if (nunchuck.raw_axis.x < nunchuck.calibration.center.x) // [-1, 0]
-									nunchuck.axis.x = ((float)nunchuck.raw_axis.x - calib.min.x) / ((float)nunchuck.
-										calibration.center.x - calib.min.x + 0.012f) - 1.0f;
-								else // [0, 1]
-									nunchuck.axis.x = (float)(nunchuck.raw_axis.x - nunchuck.calibration.center.x) / (
-										nunchuck.calibration.max.x - nunchuck.calibration.center.x + 0.012f);
-
-								if (nunchuck.raw_axis.y <= nunchuck.calibration.center.y) // [-1, 0]
-									nunchuck.axis.y = ((float)nunchuck.raw_axis.y - calib.min.y) / ((float)nunchuck.
-										calibration.center.y - calib.min.y + 0.012f) - 1.0f;
-								else // [0, 1]
-									nunchuck.axis.y = (float)(nunchuck.raw_axis.y - nunchuck.calibration.center.y) / (
-										nunchuck.calibration.max.y - nunchuck.calibration.center.y);
-
-								glm::vec3 acceleration = raw_acc;
-								nunchuck.prev_acceleration = nunchuck.acceleration;
-								nunchuck.acceleration = acceleration - glm::vec3(calib.zero);
-
-								float acc[3]{ -nunchuck.acceleration.x, -nunchuck.acceleration.z, nunchuck.acceleration.y };
-								const auto grav = nunchuck.calibration.gravity - nunchuck.calibration.zero;
-
-								auto tacc = nunchuck.acceleration;
-								auto pacc = nunchuck.prev_acceleration;
-								if (grav != glm::vec<3, uint16>{})
-								{
-									acc[0] /= (float)grav.x;
-									acc[1] /= (float)grav.y;
-									acc[2] /= (float)grav.z;
-
-									tacc.x /= (float)grav.x;
-									pacc.x /= (float)grav.x;
-
-									tacc.y /= (float)grav.y;
-									pacc.y /= (float)grav.y;
-
-									tacc.z /= (float)grav.z;
-									pacc.z /= (float)grav.z;
-								}
-								float zero3[3]{};
-								float zero4[4]{};
-
-
-								nunchuck.motion_sample = MotionSample(
-									acc,
-									glm::length(tacc - pacc),
-									zero3,
-									zero3,
-									zero4
-								);
-                                cemuLog_logDebug(LogType::Force,"Nunchuck: Z={}, C={} | {}, {} | {:.2f}, {:.2f}, {:.2f}",
-                                                 nunchuck.z, nunchuck.c,
-                                                 nunchuck.axis.x, nunchuck.axis.y,
-                                                 RadToDeg(nunchuck.acceleration.x), RadToDeg(nunchuck.acceleration.y),
-                                                 RadToDeg(nunchuck.acceleration.z));
-							},
-							[data](ClassicData& classic) mutable
-							{
-								classic.left_raw_axis.x = *data & 0x3F;
-								classic.right_raw_axis.x = (*data & 0xC0) >> 3; // 7|6 -> 4|3
-								++data;
-
-								classic.left_raw_axis.y = *data & 0x3F;
-								classic.right_raw_axis.x |= (*data & 0xC0) >> 5; // 7|6 -> 2|1
-								++data;
-
-								classic.right_raw_axis.y = *data & 0x1F;
-								classic.raw_trigger.x = (*data & 0x60) >> 2; // 6|5 -> 4|3
-								classic.right_raw_axis.x |= (*data & 0x80) >> 7; // 7 -> 0
-								++data;
-
-								classic.raw_trigger.x |= (*data & 0xE0) >> 5; // 7|5 -> 2|0
-								classic.raw_trigger.y = (*data & 0x1F);
-								++data;
-
-								classic.buttons = ~(*(uint16*)data);
-								data += 2;
-
-								classic.left_axis = classic.left_raw_axis;
-								classic.left_axis /= 63.0f;
-								classic.left_axis = classic.left_axis * 2.0f - 1.0f;
-
-								classic.right_axis = classic.right_raw_axis;
-								classic.right_axis /= 31.0f;
-								classic.right_axis = classic.right_axis * 2.0f - 1.0f;
-
-								classic.trigger = classic.raw_trigger;
-								classic.trigger /= 31.0f;
-                                cemuLog_logDebug(LogType::Force,"Classic Controller: Buttons={:b} | {}, {} | {}, {} | {}, {}",
-                                                 classic.buttons, classic.left_axis.x, classic.left_axis.y,
-                                                 classic.right_axis.x, classic.right_axis.y, classic.trigger.x,
-                                                 classic.trigger.y);
-
-							}
-						}, new_state.m_extension);
-
-
-					break;
-				}
-			case kDataExt:
-				{
-					// 3d EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE EE
-					break;
-				}
-			default:
-                cemuLog_logDebug(LogType::Force,"unhandled input packet id {} for wiimote {}", id, index);
-			}
-
-			// update motion data
-			//const auto motionnow = std::chrono::high_resolution_clock::now();
-			//const auto delta_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(motionnow - new_state.m_last_motion_timestamp).count() / 1000.0f;
-			//new_state.m_last_motion_timestamp = motionnow;
-
-			float acc[3]{-new_state.m_acceleration.x, -new_state.m_acceleration.z, new_state.m_acceleration.y};
-			const auto grav = new_state.m_calib_acceleration.gravity - new_state.m_calib_acceleration.zero;
-
-			auto tacc = new_state.m_acceleration;
-			auto pacc = new_state.m_prev_acceleration;
-			if (grav != glm::vec<3, uint16>{})
-			{
-				acc[0] /= (float)grav.x;
-				acc[1] /= (float)grav.y;
-				acc[2] /= (float)grav.z;
-
-				tacc.x /= (float)grav.x;
-				pacc.x /= (float)grav.x;
-
-				tacc.y /= (float)grav.y;
-				pacc.y /= (float)grav.y;
-
-				tacc.z /= (float)grav.z;
-				pacc.z /= (float)grav.z;
-			}
-			float zero3[3]{};
-			float zero4[4]{};
-
-
-			new_state.motion_sample = MotionSample(
-				acc,
-				glm::length(tacc - pacc),
-				zero3,
-				zero3,
-				zero4
-			);
-
-			std::unique_lock data_lock(wiimote.mutex);
-			wiimote.state = new_state;
-			data_lock.unlock();
-
-			if (update_report)
-				update_report_type(index);
-		}
-
-		lock.unlock();
-		if (!receivedAnyPacket)
-		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		}
-	}
+                case kDataCoreExt8: case kDataCoreExt19:
+                    extensions.Data(std::span(b).subspan(3), milliseconds); break;
+                case kDataCoreIRExt:
+                    parse_ir(state, b.data() + 3, kBasicIR);
+                    extensions.Data(std::span(b).subspan(13), milliseconds); break;
+                case kDataExt:
+                    extensions.Data(std::span(b).subspan(1), milliseconds); break;
+                default: break;
+                }
+            }
+            sync_extensions(state, extensions);
+            const bool extended = extensions.NeedsExtensionReports();
+            updateReport |= previousExtended != extended;
+            // Finish extension discovery before flooding the transport with IR.
+            // No-extension remotes also need their IR camera enabled when ready.
+            updateReport |= extensions.IsReady() && state.ir_camera.mode == kIRDisabled;
+            const auto sequence = state.m_motion_plus ? state.m_motion_plus->sequence : 0;
+            const bool gyroUpdated = sequence != previousSequence;
+            if (gyroUpdated || (accelerationUpdated && !state.m_motion_plus))
+            {
+                const auto gravity = glm::vec3(state.m_calib_acceleration.gravity) - glm::vec3(state.m_calib_acceleration.zero);
+                const auto acceleration = state.m_acceleration / gravity;
+                const auto gyro = state.m_motion_plus ? state.m_motion_plus->angular_velocity : glm::vec3{};
+                const auto elapsed = state.m_motion_clock.elapsed(wiimote.device->last_report_timestamp_us(), now);
+                if (state.m_motion_plus)
+                    state.m_motion_plus->angles += WiiMotionCoordinates::AngularVelocity(gyro) * elapsed;
+                const auto fusionGyro = WiiMotionCoordinates::ToFusion(gyro);
+                const auto fusionAcc = WiiMotionCoordinates::ToFusion(acceleration);
+                // Starting sideways must not spend seconds converging from an assumed
+                // flat pose. A completed stationary zero window can also restore tilt
+                // after movement during startup (when gyro output was suppressed).
+                if (!state.m_gravity_initialized || (!previousZero && state.m_motion_plus && state.m_motion_plus->zero_calibrated))
+                    state.m_gravity_initialized = state.motion_handler.alignToGravity(fusionAcc.x, fusionAcc.y, fusionAcc.z);
+                // WiiExtensionProtocol already removes the stationary gyro bias.
+                state.motion_handler.processMotionSample(elapsed,
+                    fusionGyro.x, fusionGyro.y, fusionGyro.z,
+                    fusionAcc.x, fusionAcc.y, fusionAcc.z, false);
+                state.motion_sample = state.motion_handler.getMotionSample().withWiiRemoteAxes();
+            }
+            auto moreCommands = extensions.TakeCommands();
+            commands.insert(commands.end(), std::make_move_iterator(moreCommands.begin()), std::make_move_iterator(moreCommands.end()));
+            for (auto& command : commands) send_packet(index, std::move(command));
+            {
+                std::unique_lock dataLock(wiimote.mutex);
+                wiimote.state = std::move(state);
+            }
+#if BOOST_OS_IOS
+            const auto& mp = extensions.GetMotionPlus();
+            UpdateBLEWiimoteFeatures(*wiimote.device, (mp.active ? 1 : 0) |
+                (extensions.GetExtension() == WiiExtensionProtocol::Extension::Nunchuck ? 2 : 0) |
+                (extensions.GetExtension() == WiiExtensionProtocol::Extension::Classic ? 4 : 0) |
+                (mp.zeroCalibrated ? 8 : 0));
+#endif
+            if (updateReport) update_report_type(index);
+        }
+        lock.unlock();
+        if (!receivedAnyPacket) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 void WiimoteControllerProvider::parse_acceleration(WiimoteState& wiimote_state, const uint8*& data)
@@ -745,6 +462,7 @@ void WiimoteControllerProvider::parse_acceleration(WiimoteState& wiimote_state, 
 	raw_acc.z |= (uint16)*data << 2;
 	++data;
 
+	wiimote_state.m_raw_acceleration = raw_acc;
 	wiimote_state.m_prev_acceleration = wiimote_state.m_acceleration;
 	glm::vec3 acceleration = raw_acc;
 
@@ -761,97 +479,21 @@ void WiimoteControllerProvider::parse_acceleration(WiimoteState& wiimote_state, 
 
 void WiimoteControllerProvider::rotate_ir(WiimoteState& wiimote_state)
 {
-	const float rot = wiimote_state.m_roll;
-	if (rot == 0.0f)
-		return;
-
-	const float sin = std::sin(rot);
-	const float cos = std::cos(rot);
-	int i = -1;
-	for (auto& dot : wiimote_state.ir_camera.dots)
-	{
-		i++;
-		if (!dot.visible)
-			continue;
-		// move to center, rotate and move back
-		dot.pos -= 0.5f;
-		dot.pos.x = (dot.pos.x * cos) + (dot.pos.y * (-sin));
-		dot.pos.y = (dot.pos.x * sin) + (dot.pos.y * cos);
-		dot.pos += 0.5f;
-	}
+    for (auto& dot : wiimote_state.ir_camera.dots)
+        if (dot.visible) dot.pos = WiiIRTracking::Rotate(dot.pos, wiimote_state.m_roll);
 }
 
 void WiimoteControllerProvider::calculate_ir_position(WiimoteState& wiimote_state)
 {
-	auto& ir = wiimote_state.ir_camera;
-	ir.m_prev_position = ir.position;
-
-	std::pair indices = ir.indices;
-	if (ir.middle.x != 0)
-	{
-		const float last_angle = std::atan(ir.middle.y / ir.middle.x);
-		float best_distance = std::numeric_limits<float>::max();
-		for (size_t i = 0; i < ir.dots.size(); ++i)
-		{
-			if (!ir.dots[i].visible)
-				continue;
-
-			for (size_t j = i + 1; j < ir.dots.size(); ++j)
-			{
-				if (!ir.dots[j].visible)
-					continue;
-
-				const auto mid = (ir.dots[i].pos + ir.dots[j].pos) / 2.0f;
-				if (mid.x == 0)
-					continue;
-
-				// check if angle is close enough to the last known one
-				float angle = std::atan(mid.y / mid.x);
-				if (std::abs(last_angle - angle) > DegToRad(10.0f))
-					continue;
-
-				// check if distance between points is similar to last known distance
-				const float distance = std::abs(ir.distance - glm::length(ir.dots[i].pos - ir.dots[j].pos));
-				if (distance > 0.1f && distance > best_distance)
-					continue;
-
-				// found a new pair
-				best_distance = distance;
-				indices = {(sint32)i, (sint32)j};
-			}
-		}
-	}
-
-	if (ir.dots[indices.first].visible && ir.dots[indices.second].visible)
-	{
-		ir.prev_dots[indices.first] = ir.dots[indices.first];
-		ir.prev_dots[indices.second] = ir.dots[indices.second];
-		ir.position = (ir.dots[indices.first].pos + ir.dots[indices.second].pos) / 2.0f;
-
-		ir.middle = ir.position;
-		ir.distance = glm::length(ir.dots[indices.first].pos - ir.dots[indices.second].pos);
-		ir.indices = indices;
-		ir.m_positionVisibility = PositionVisibility::FULL;
-	}
-	else if (ir.dots[indices.first].visible)
-	{
-		ir.position = ir.middle + (ir.dots[indices.first].pos - ir.prev_dots[indices.first].pos);
-		ir.m_positionVisibility = PositionVisibility::PARTIAL;
-	}
-	else if (ir.dots[indices.second].visible)
-	{
-		ir.position = ir.middle + (ir.dots[indices.second].pos - ir.prev_dots[indices.second].pos);
-		ir.m_positionVisibility = PositionVisibility::PARTIAL;
-	}
-	else {
-		ir.m_positionVisibility = PositionVisibility::NONE;
-	}
+    WiiIRTracking::Track(wiimote_state.ir_camera);
 }
 
-
-sint32 WiimoteControllerProvider::parse_ir(WiimoteState& wiimote_state, const uint8* data)
+sint32 WiimoteControllerProvider::parse_ir(WiimoteState& wiimote_state, const uint8* data, IRMode mode)
 {
-	switch (wiimote_state.ir_camera.mode)
+    ++wiimote_state.ir_camera.sequence;
+    wiimote_state.ir_camera.timestamp = std::chrono::steady_clock::now();
+	// Reports in flight may use the old mode while IR registers are changing.
+	switch (mode)
 	{
 	case kIRDisabled:
 		wiimote_state.ir_camera.dots = {};
@@ -921,32 +563,6 @@ sint32 WiimoteControllerProvider::parse_ir(WiimoteState& wiimote_state, const ui
 	return 0;
 }
 
-void WiimoteControllerProvider::request_extension(size_t index)
-{
-	// send_write_packet(index, kRegisterMemory, kRegisterExtensionEncrypted, { 0x00 });
-	send_write_packet(index, kRegisterMemory, kRegisterExtension1, {0x55});
-	send_write_packet(index, kRegisterMemory, kRegisterExtension2, {0x00});
-	send_read_packet(index, kRegisterMemory, kRegisterExtensionType, 6);
-}
-
-void WiimoteControllerProvider::detect_motion_plus(size_t index)
-{
-	send_read_packet(index, kRegisterMemory, kRegisterMotionPlusDetect, 6);
-}
-
-void WiimoteControllerProvider::set_motion_plus(size_t index, bool state)
-{
-	if (state) {
-		send_write_packet(index, kRegisterMemory, kRegisterMotionPlusInit, { 0x55 });
-		send_write_packet(index, kRegisterMemory, kRegisterMotionPlusEnable, { 0x04 });
-	}
-	else
-	{
-		send_write_packet(index, kRegisterMemory, kRegisterExtension1, { 0x55 });
-	}
-}
-
-
 void WiimoteControllerProvider::writer_thread()
 {
 	SetThreadName("Wiimote-writer");
@@ -964,7 +580,9 @@ void WiimoteControllerProvider::writer_thread()
 
 		auto index = (size_t)-1;
 		std::vector<uint8> data;
+		writer_lock.unlock();
 		std::shared_lock device_lock(m_device_mutex);
+		writer_lock.lock();
 
 		// get first packet of device which is ready to be sent
 		const auto now = std::chrono::high_resolution_clock::now();
@@ -993,7 +611,7 @@ void WiimoteControllerProvider::writer_thread()
 				data[1] |= 1;
 			if (!wiimote.device->write_data(data))
 			{
-				wiimote.device.reset();
+				wiimote.disconnected = true;
 				wiimote.rumble = false;
 			}
 			else
@@ -1008,7 +626,7 @@ void WiimoteControllerProvider::writer_thread()
 
 void WiimoteControllerProvider::calibrate(size_t index)
 {
-	send_read_packet(index, kEEPROMMemory, kRegisterCalibration, 8);
+	send_read_packet(index, kEEPROMMemory, kRegisterCalibration, 10);
 }
 
 void WiimoteControllerProvider::update_report_type(size_t index)
@@ -1016,7 +634,7 @@ void WiimoteControllerProvider::update_report_type(size_t index)
 	std::shared_lock read_lock(m_wiimotes[index].mutex);
 	auto& state = m_wiimotes[index].state;
 
-	const bool extension = state.m_extension.index() != 0; // TODO || HasMotionPlus();
+	const bool extension = state.m_extension.index() != 0 || state.m_motion_plus.has_value();
 	const bool ir = state.ir_camera.mode != kIRDisabled;
 	const bool motion = true; // UseMotion();
 
@@ -1041,12 +659,13 @@ void WiimoteControllerProvider::update_report_type(size_t index)
     cemuLog_logDebug(LogType::Force,"Setting report type to {}", report_type);
 	send_packet(index, {kType, 0x04, report_type});
 
-	state.ir_camera.mode = set_ir_camera(index, true);
+	read_lock.unlock();
+	if (m_wiimotes[index].extensions.IsReady()) set_ir_camera(index, true);
 }
 
 IRMode WiimoteControllerProvider::set_ir_camera(size_t index, bool state)
 {
-	std::shared_lock read_lock(m_wiimotes[index].mutex);
+	std::unique_lock state_lock(m_wiimotes[index].mutex);
 	auto& wiimote_state = m_wiimotes[index].state;
 
 	IRMode mode;
@@ -1054,13 +673,14 @@ IRMode WiimoteControllerProvider::set_ir_camera(size_t index, bool state)
 		mode = kIRDisabled;
 	else
 	{
-		mode = wiimote_state.m_extension.index() == 0 ? kExtendedIR : kBasicIR;
+		mode = wiimote_state.m_extension.index() == 0 && !wiimote_state.m_motion_plus ? kExtendedIR : kBasicIR;
 	}
 
 	if (wiimote_state.ir_camera.mode == mode)
 		return mode;
 
 	wiimote_state.ir_camera.mode = mode;
+	state_lock.unlock();
 
 	const uint8_t data = state ? 0x04 : 0x00;
 	send_packet(index, {kIR, data});
@@ -1083,12 +703,8 @@ void WiimoteControllerProvider::send_packet(size_t index, std::vector<uint8> dat
 {
 	cemu_assert(data.size() > 1);
 
-	std::shared_lock device_lock(m_device_mutex);
-	if (index >= m_wiimotes.size())
-		return;
-
-	device_lock.unlock();
-
+	// The writer validates the index under m_device_mutex. The reader also
+	// queues commands while holding that mutex, so do not acquire it recursively.
 	std::unique_lock lock(m_writer_mutex);
 	m_write_queue.emplace_back(index, data);
 	m_writer_cond.notify_one();

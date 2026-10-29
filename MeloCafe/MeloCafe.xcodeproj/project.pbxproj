@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        B1E000000000000000000003 /* NintendoBLE in Frameworks */ = {isa = PBXBuildFile; productRef = B1E000000000000000000002 /* NintendoBLE */; };
 		4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F4372F5A950A003D2387 /* GameController.framework */; };
 		4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F3FC2F599094003D2387 /* Metal.framework */; };
 		4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */; };
@@ -150,6 +151,7 @@
 			files = (
 				4EEB1C5130862AAE0026926E /* Cemu.framework/Cemu in Frameworks */,
 				4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */,
+                B1E000000000000000000003 /* NintendoBLE in Frameworks */,
 				4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */,
 				4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */,
 			);
@@ -231,6 +233,7 @@
 			);
 			name = MeloCafe;
 			packageProductDependencies = (
+                B1E000000000000000000002 /* NintendoBLE */,
 				4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */,
 			);
 			productName = MeloCafe;
@@ -289,6 +292,7 @@
 			mainGroup = 4E1B36CE2F5924AF00D151B0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+                B1E000000000000000000001 /* XCLocalSwiftPackageReference "ios_ble_nintendo" */,
 				4E442DEB2F5DB3EC00DD0F47 /* XCRemoteSwiftPackageReference "Melo-Controller" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -715,6 +719,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+        B1E000000000000000000001 /* XCLocalSwiftPackageReference "ios_ble_nintendo" */ = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = ../../ios_ble_nintendo;
+        };
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		4E442DEB2F5DB3EC00DD0F47 /* XCRemoteSwiftPackageReference "Melo-Controller" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -727,6 +738,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+        B1E000000000000000000002 /* NintendoBLE */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = B1E000000000000000000001 /* XCLocalSwiftPackageReference "ios_ble_nintendo" */;
+            productName = NintendoBLE;
+        };
 		4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 4E442DEB2F5DB3EC00DD0F47 /* XCRemoteSwiftPackageReference "Melo-Controller" */;

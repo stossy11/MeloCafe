@@ -3,6 +3,7 @@
 #include "input/emulated/EmulatedController.h"
 #include "Cafe/OS/libs/padscore/padscore.h"
 #include "Cafe/OS/libs/vpad/vpad.h"
+#include "input/motion/WiiIRHeading.h"
 
 constexpr uint32 kWPADButtonRepeat = 0x80000000;
 
@@ -104,6 +105,8 @@ enum WPADDataFormat {
 	 kDataFormat_URCC = 22, // buttons, URCC aka pro
 };
 
+class NativeWiimoteController;
+
 class WPADController : public EmulatedController
 {
 	using base_type = EmulatedController;
@@ -121,6 +124,14 @@ public:
 
 	void KPADRead(KPADStatus_t& status, const BtnRepeat& repeat);
 	virtual bool is_mpls_attached() { return false; }
+    std::shared_ptr<NativeWiimoteController> get_native_wiimote() const;
+    bool m_mpls_enabled = true;
+    glm::vec3 m_mpls_angle_offset{};
+    glm::vec3 m_mpls_velocity_scale{1.0f};
+    glm::mat3 m_mpls_direction_offset{1.0f};
+    WiiIRHeading::Correction m_mpls_ir_heading;
+    void SetMotionPlusAngle(glm::vec3 angle);
+    void SetMotionPlusDirection(const glm::mat3& direction);
 
 	enum class ConnectCallbackStatus
 	{

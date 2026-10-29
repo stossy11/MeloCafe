@@ -8,6 +8,8 @@
 #include "util/EventService.h"
 
 #if BOOST_OS_IOS
+#include "input/api/Wiimote/NativeWiimoteController.h"
+#include "input/api/Wiimote/BLEWiimoteBridge.h"
 #include "input/api/iOS/GCController.h"
 #include "input/api/iOS/GCControllerProvider.h"
 #include "input/emulated/VPADController.h"
@@ -20,6 +22,7 @@ InputManager::InputManager()
 {
 #if BOOST_OS_IOS
     create_provider<GCControllerProvider>();
+    create_provider<WiimoteControllerProvider>();
 #else
 #if HAS_KEYBOARD
     create_provider<KeyboardControllerProvider>();
@@ -70,6 +73,13 @@ void InputManager::load() noexcept
 }
 
 #if BOOST_OS_IOS
+
+// Keep this entry point in the core's InputManager object so the app does not
+// instantiate another inline singleton when linking the static input archive.
+extern "C" void WiiRemoteBridge_notifyChanged()
+{
+    InputManager::instance().on_device_changed();
+}
 
 static constexpr int kGCBitA       = 0;
 static constexpr int kGCBitB       = 1;
@@ -216,6 +226,7 @@ void InputManager::load_gc_controllers()
     const auto controllers = provider->get_controllers();
     decltype(m_vpad) next_vpad{};
     decltype(m_wpad) next_wpad{};
+    std::array<bool, kMaxController> assignedPlayers{};
     size_t vpad_count = 0;
     size_t wpad_count = 0;
     const size_t controller_count = std::min(controllers.size(), kMaxController);
@@ -240,6 +251,7 @@ void InputManager::load_gc_controllers()
                 emulated->add_controller(device);
                 apply_default_gc_mappings(emulated, device);
             }
+            assignedPlayers[i] = true;
             if (type == EmulatedController::Type::VPAD)
                 next_vpad[vpad_count++] = std::static_pointer_cast<VPADController>(emulated);
             else
@@ -248,6 +260,36 @@ void InputManager::load_gc_controllers()
         catch (const std::exception& ex)
         {
             cemuLog_log(LogType::Force, "Failed to wire GCController[{}]: {}", i, ex.what());
+        }
+    }
+    // ESP32 remotes enter the native Wiimote provider and occupy Wii WPAD ports.
+    // Keep them out of GCController and its configurable GamePad/Pro mappings.
+    if (auto wiiProvider = get_api_provider(InputAPI::Wiimote))
+    {
+        for (const auto& controller : wiiProvider->get_controllers())
+        {
+            if (vpad_count + wpad_count >= kMaxController || wpad_count >= kMaxWPADControllers) break;
+            const auto device = std::dynamic_pointer_cast<NativeWiimoteController>(controller);
+            if (!device || !device->is_connected()) continue;
+            const auto available = std::find(assignedPlayers.begin(), assignedPlayers.end(), false);
+            if (available == assignedPlayers.end()) break;
+            const auto playerIndex = static_cast<size_t>(available - assignedPlayers.begin());
+            *available = true;
+            auto emulated = std::dynamic_pointer_cast<WiimoteController>(get_wpad_controller(wpad_count));
+            if (!emulated || emulated->player_index() != playerIndex ||
+                emulated->get_controllers().size() != 1 ||
+                emulated->get_controllers().front()->api() != InputAPI::Wiimote ||
+                emulated->get_controllers().front()->uuid() != device->uuid())
+            {
+                emulated = std::make_shared<WiimoteController>(playerIndex);
+                auto settings = device->get_settings();
+                settings.rumble = 1.0f;
+                device->set_settings(settings);
+                emulated->add_controller(device);
+                emulated->set_default_mapping(device);
+                device->set_player_index(wpad_count);
+            }
+            next_wpad[wpad_count++] = std::move(emulated);
         }
     }
     {

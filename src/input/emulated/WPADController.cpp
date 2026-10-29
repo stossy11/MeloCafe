@@ -1,14 +1,111 @@
 #include <api/Controller.h>
 #include "input/emulated/WPADController.h"
+#include "input/motion/WiiMotionCoordinates.h"
 
 #include "input/emulated/ClassicController.h"
 #include "input/emulated/ProController.h"
 #include "input/emulated/WiimoteController.h"
+#ifdef SUPPORTS_WIIMOTE
+#include "input/api/Wiimote/NativeWiimoteController.h"
+#endif
 
 WPADController::WPADController(size_t player_index, WPADDataFormat data_format)
 	: EmulatedController(player_index), m_data_format(data_format)
 {
 }
+
+std::shared_ptr<NativeWiimoteController> WPADController::get_native_wiimote() const
+{
+#ifdef SUPPORTS_WIIMOTE
+    std::shared_lock lock(m_mutex);
+    for (const auto& controller : m_controllers)
+        if (const auto native = std::dynamic_pointer_cast<NativeWiimoteController>(controller)) return native;
+#endif
+    return {};
+}
+
+void WPADController::SetMotionPlusAngle(glm::vec3 angle)
+{
+    auto sample = get_motion_data();
+    glm::vec3 current{};
+    sample.getVPADOrientation(&current.x);
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        if (state.m_motion_plus) current = state.m_motion_plus->angles;
+    }
+#endif
+    current *= m_mpls_velocity_scale;
+    m_mpls_angle_offset = angle - current;
+}
+
+void WPADController::SetMotionPlusDirection(const glm::mat3& direction)
+{
+    auto sample = get_motion_data();
+    glm::mat3 current;
+    sample.getVPADAttitudeMatrix(&current[0][0]);
+    m_mpls_direction_offset = direction * glm::transpose(current);
+    m_mpls_ir_heading.reset();
+}
+
+#ifdef SUPPORTS_WIIMOTE
+namespace
+{
+uint16 NativeClassicButtons(uint16 buttons)
+{
+    uint16 result = 0;
+    const std::pair<int, int> mapping[]{
+        {kClassicButton_A, kCLButton_A}, {kClassicButton_B, kCLButton_B},
+        {kClassicButton_X, kCLButton_X}, {kClassicButton_Y, kCLButton_Y},
+        {kClassicButton_L, kCLButton_L}, {kClassicButton_R, kCLButton_R},
+        {kClassicButton_ZL, kCLButton_ZL}, {kClassicButton_ZR, kCLButton_ZR},
+        {kClassicButton_Plus, kCLButton_Plus}, {kClassicButton_Minus, kCLButton_Minus},
+        {kClassicButton_Home, kCLButton_Home}, {kClassicButton_Up, kCLButton_Up},
+        {kClassicButton_Down, kCLButton_Down}, {kClassicButton_Left, kCLButton_Left},
+        {kClassicButton_Right, kCLButton_Right}};
+    for (const auto& [physical, emulated] : mapping) if (buttons & (1 << physical)) result |= emulated;
+    return result;
+}
+void FillNativeCore(WPADStatus_t& output, const WiimoteControllerProvider::WiimoteState& state)
+{
+    output.button = state.buttons;
+    const auto g = glm::vec3(state.m_calib_acceleration.gravity) - glm::vec3(state.m_calib_acceleration.zero);
+    const auto acceleration = state.m_acceleration / g * 99.0f;
+    output.accX = static_cast<sint16>(std::clamp(acceleration.x, -32768.0f, 32767.0f));
+    output.accY = static_cast<sint16>(std::clamp(acceleration.y, -32768.0f, 32767.0f));
+    output.accZ = static_cast<sint16>(std::clamp(acceleration.z, -32768.0f, 32767.0f));
+    for (size_t i = 0; i < 4; ++i)
+    {
+        const auto& dot = state.ir_camera.dots[i];
+        output.obj[i].x = dot.visible ? dot.raw.x : 1023;
+        output.obj[i].y = dot.visible ? dot.raw.y : 1023;
+        output.obj[i].size = dot.visible ? dot.size : 0;
+        output.obj[i].traceId = dot.visible ? i : 0xff;
+    }
+    if (const auto n = std::get_if<NunchuckData>(&state.m_extension))
+        output.button = state.buttons | (n->c ? kWPADButton_C : 0) | (n->z ? kWPADButton_Z : 0);
+}
+template<class Status> void FillNativeNunchuck(Status& output, const NunchuckData& n)
+{
+    output.fsAccX = static_cast<sint16>(std::clamp(n.acceleration.x * 99, -32768.0f, 32767.0f));
+    output.fsAccY = static_cast<sint16>(std::clamp(n.acceleration.y * 99, -32768.0f, 32767.0f));
+    output.fsAccZ = static_cast<sint16>(std::clamp(n.acceleration.z * 99, -32768.0f, 32767.0f));
+    output.fsStickX = static_cast<sint8>(std::clamp(n.axis.x * 127, -128.0f, 127.0f));
+    output.fsStickY = static_cast<sint8>(std::clamp(n.axis.y * 127, -128.0f, 127.0f));
+}
+template<class Status> void FillNativeClassic(Status& output, const ClassicData& c)
+{
+    output.clButton = NativeClassicButtons(c.buttons);
+    output.clLStickX = static_cast<sint16>(c.left_axis.x * 511);
+    output.clLStickY = static_cast<sint16>(c.left_axis.y * 511);
+    output.clRStickX = static_cast<sint16>(c.right_axis.x * 511);
+    output.clRStickY = static_cast<sint16>(c.right_axis.y * 511);
+    output.clTriggerL = static_cast<uint8>(c.trigger.x * 255);
+    output.clTriggerR = static_cast<uint8>(c.trigger.y * 255);
+}
+}
+#endif
 
 WPADDataFormat WPADController::get_default_data_format() const
 {
@@ -146,8 +243,8 @@ void WPADController::WPADRead(WPADStatus_t* status)
 	case kDataFormat_MPLS:
 	{
 		WPADMPStatus_t* ex_status = (WPADMPStatus_t*)status;
-		ex_status->stat = 1; // attached
-		// TODO
+        memset(ex_status, 0, sizeof(*ex_status));
+        ex_status->button = button;
 		break;
 	}
 	case kDataFormat_URCC:
@@ -175,6 +272,40 @@ void WPADController::WPADRead(WPADStatus_t* status)
 		cemu_assert(false);
 	}
 
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        FillNativeCore(*status, state);
+        if (m_data_format == kDataFormat_MPLS)
+        {
+            auto& output = *static_cast<WPADMPStatus_t*>(status);
+            if (const auto n = std::get_if<NunchuckData>(&state.m_extension)) FillNativeNunchuck(output.status.fs, *n);
+            if (const auto c = std::get_if<ClassicData>(&state.m_extension)) FillNativeClassic(output.status.cl, *c);
+            if (state.m_motion_plus && m_mpls_enabled)
+            {
+                const auto& mp = *state.m_motion_plus;
+                const auto nunchuck = std::get_if<NunchuckData>(&state.m_extension);
+                const auto classic = std::get_if<ClassicData>(&state.m_extension);
+                const bool extensionSample = (nunchuck && nunchuck->sequence) || (classic && classic->sequence);
+                output.stat = (mp.last_report_gyro ? (mp.sequence ? 0x80 : 0) : (extensionSample ? 0x40 : 0)) |
+                    (mp.extension_connected ? 1 : 0) |
+                    (mp.slow[1] ? 2 : 0) | (mp.slow[2] ? 4 : 0) | (mp.slow[0] ? 8 : 0);
+                output.pitch = mp.raw[2]; output.yaw = mp.raw[0]; output.roll = mp.raw[1];
+            }
+        }
+        else if (m_data_format >= kDataFormat_FREESTYLE && m_data_format <= kDataFormat_FREESTYLE_ACC_DPD)
+        {
+            if (const auto n = std::get_if<NunchuckData>(&state.m_extension))
+                FillNativeNunchuck(*static_cast<WPADFSStatus_t*>(status), *n);
+        }
+        else if (m_data_format >= kDataFormat_CLASSIC && m_data_format <= kDataFormat_CLASSIC_ACC_DPD)
+        {
+            if (const auto c = std::get_if<ClassicData>(&state.m_extension))
+                FillNativeClassic(*static_cast<WPADCLStatus_t*>(status), *c);
+        }
+    }
+#endif
 	status->dev = get_device_type();
 	status->err = WPAD_ERR_NONE;
 }
@@ -182,7 +313,8 @@ void WPADController::WPADRead(WPADStatus_t* status)
 void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 {
 	uint32be* hold, *release, *trigger;
-	switch (type())
+    const bool classicExtension = get_device_type() == kWAPDevClassic || get_device_type() == kWAPDevMPLSClassic;
+	switch (classicExtension ? Classic : type())
 	{
 	case Pro:
 		hold = &status.ex_status.uc.hold;
@@ -210,6 +342,23 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 		}
 	}
 
+#ifdef SUPPORTS_WIIMOTE
+    if (const auto native = get_native_wiimote())
+    {
+        const auto state = native->get_native_state();
+        if (const auto c = std::get_if<ClassicData>(&state.m_extension))
+        {
+            *hold = NativeClassicButtons(c->buttons);
+            status.hold = state.buttons;
+        }
+        else
+        {
+            *hold = state.buttons;
+            if (const auto n = std::get_if<NunchuckData>(&state.m_extension))
+                *hold = state.buttons | (n->c ? kWPADButton_C : 0) | (n->z ? kWPADButton_Z : 0);
+        }
+    }
+#endif
 	m_homebutton_down |= is_home_down();
 	
 	// button repeat
@@ -241,7 +390,7 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 	//status.trig = ~m_last_holdvalue & *hold;
 	m_last_holdvalue = *hold;
 
-	if (is_mpls_attached())
+	if (is_mpls_attached() && m_mpls_enabled)
 	{
 		status.mpls.dir.X.x = 1;
 		status.mpls.dir.X.y = 0;
@@ -262,6 +411,14 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 
 		glm::vec3 acc;
 		motion_sample.getAccelerometer(&acc[0]);
+#ifdef SUPPORTS_WIIMOTE
+        if (const auto native = get_native_wiimote())
+        {
+            const auto state = native->get_native_state();
+            const auto range = glm::vec3(state.m_calib_acceleration.gravity) - glm::vec3(state.m_calib_acceleration.zero);
+            acc = state.m_acceleration / range;
+        }
+#endif
 		status.acc.x = acc.x;
 		status.acc.y = acc.y;
 		status.acc.z = acc.z;
@@ -276,12 +433,21 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 
 		status.accVertical.x = std::min(1.0f, std::abs(acc.x + acc.y));
 		status.accVertical.y = std::min(std::max(-1.0f, -acc.z), 1.0f);
+#ifdef SUPPORTS_WIIMOTE
+        if (get_native_wiimote())
+        {
+            const auto down = WiiMotionCoordinates::Down(acc);
+            status.accVertical.x = down.x;
+            status.accVertical.y = down.y;
+        }
+#endif
 
-		if (is_mpls_attached())
+		if (is_mpls_attached() && m_mpls_enabled)
 		{
 			// todo
 			glm::vec3 gyroChange;
 			motion_sample.getVPADGyroChange(&gyroChange[0]);
+            gyroChange *= m_mpls_velocity_scale;
 			//const auto& gyroChange = motionSample.getVPADGyroChange();
 			status.mpls.mpls.x = gyroChange.x;
 			status.mpls.mpls.y = gyroChange.y;
@@ -291,13 +457,33 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 
 			glm::vec3 gyroOrientation;
 			motion_sample.getVPADOrientation(&gyroOrientation[0]);
+#ifdef SUPPORTS_WIIMOTE
+            if (const auto native = get_native_wiimote())
+            {
+                const auto state = native->get_native_state();
+                if (state.m_motion_plus) gyroOrientation = state.m_motion_plus->angles;
+            }
+#endif
+            gyroOrientation = gyroOrientation * m_mpls_velocity_scale + m_mpls_angle_offset;
 			//const auto& gyroOrientation = motionSample.getVPADOrientation();
 			status.mpls.angle.x = gyroOrientation.x;
 			status.mpls.angle.y = gyroOrientation.y;
 			status.mpls.angle.z = gyroOrientation.z;
 
-			float attitude[9];
-			motion_sample.getVPADAttitudeMatrix(attitude);
+            glm::mat3 direction;
+            motion_sample.getVPADAttitudeMatrix(&direction[0][0]);
+            direction = m_mpls_direction_offset * direction;
+#ifdef SUPPORTS_WIIMOTE
+            if (const auto native = get_native_wiimote())
+            {
+                const auto state = native->get_native_state();
+                const auto& ir = state.ir_camera;
+                const double sampleTime = std::chrono::duration<double>(ir.timestamp.time_since_epoch()).count();
+                const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                direction = m_mpls_ir_heading.apply(direction, WiiIRHeading::Observe(ir), ir.sequence, sampleTime, now);
+            }
+#endif
+            const float* attitude = &direction[0][0];
 			status.mpls.dir.X.x = attitude[0];
 			status.mpls.dir.X.y = attitude[1];
 			status.mpls.dir.X.z = attitude[2];
@@ -331,7 +517,7 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 	else
 		status.dpd_valid_fg = 0;
 
-	switch (type())
+	switch (classicExtension ? Classic : type())
 	{
 	case Wiimote:
 		status.ex_status.fs.stick.x = axis.x;
@@ -343,6 +529,13 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 
 			glm::vec3 acc;
 			motion_sample.getAccelerometer(&acc[0]);
+#ifdef SUPPORTS_WIIMOTE
+            if (const auto native = get_native_wiimote())
+            {
+                const auto state = native->get_native_state();
+                if (const auto n = std::get_if<NunchuckData>(&state.m_extension)) acc = n->acceleration;
+            }
+#endif
 			status.ex_status.fs.acc.x = acc.x;
 			status.ex_status.fs.acc.y = acc.y;
 			status.ex_status.fs.acc.z = acc.z;
@@ -370,11 +563,20 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 		status.ex_status.cl.rstick.x = rotation.x;
 		status.ex_status.cl.rstick.y = rotation.y;
 
-		if (HAS_FLAG((uint32)status.ex_status.cl.hold, kCLButton_ZL))
-			status.ex_status.cl.ltrigger = 1.0f;
+		if (classicExtension)
+		{
+			const auto triggers = get_trigger();
+			status.ex_status.cl.ltrigger = triggers.x;
+			status.ex_status.cl.rtrigger = triggers.y;
+		}
+		else
+		{
+			if (HAS_FLAG((uint32)status.ex_status.cl.hold, kCLButton_ZL))
+				status.ex_status.cl.ltrigger = 1.0f;
 
-		if (HAS_FLAG((uint32)status.ex_status.cl.hold, kCLButton_ZR))
-			status.ex_status.cl.rtrigger = 1.0f;
+			if (HAS_FLAG((uint32)status.ex_status.cl.hold, kCLButton_ZR))
+				status.ex_status.cl.rtrigger = 1.0f;
+		}
 		break;
 	default:
 		cemu_assert(false);
