@@ -266,16 +266,25 @@ void InputManager::load_gc_controllers()
     // Keep them out of GCController and its configurable GamePad/Pro mappings.
     if (auto wiiProvider = get_api_provider(InputAPI::Wiimote))
     {
+        const auto wiiPortBase = wpad_count;
         for (const auto& controller : wiiProvider->get_controllers())
         {
             if (vpad_count + wpad_count >= kMaxController || wpad_count >= kMaxWPADControllers) break;
             const auto device = std::dynamic_pointer_cast<NativeWiimoteController>(controller);
             if (!device || !device->is_connected()) continue;
-            const auto available = std::find(assignedPlayers.begin(), assignedPlayers.end(), false);
+            // The bridge supplies player ports, including holes. Never compact
+            // player 3 into player 2 just because player 2 lost its battery.
+            const auto preferred = device->preferred_player_index();
+            const size_t wpadPort = preferred ? wiiPortBase + *preferred :
+                static_cast<size_t>(std::find(next_wpad.begin(), next_wpad.end(), nullptr) - next_wpad.begin());
+            if (wpadPort >= kMaxWPADControllers || next_wpad[wpadPort]) continue;
+            auto emulated = std::dynamic_pointer_cast<WiimoteController>(get_wpad_controller(wpadPort));
+            const auto desiredPlayer = wpadPort + vpad_count;
+            auto available = desiredPlayer < assignedPlayers.size() && !assignedPlayers[desiredPlayer] ?
+                assignedPlayers.begin() + desiredPlayer : std::find(assignedPlayers.begin(), assignedPlayers.end(), false);
             if (available == assignedPlayers.end()) break;
             const auto playerIndex = static_cast<size_t>(available - assignedPlayers.begin());
             *available = true;
-            auto emulated = std::dynamic_pointer_cast<WiimoteController>(get_wpad_controller(wpad_count));
             if (!emulated || emulated->player_index() != playerIndex ||
                 emulated->get_controllers().size() != 1 ||
                 emulated->get_controllers().front()->api() != InputAPI::Wiimote ||
@@ -287,9 +296,10 @@ void InputManager::load_gc_controllers()
                 device->set_settings(settings);
                 emulated->add_controller(device);
                 emulated->set_default_mapping(device);
-                device->set_player_index(wpad_count);
+                device->set_player_index(wpadPort);
             }
-            next_wpad[wpad_count++] = std::move(emulated);
+            next_wpad[wpadPort] = std::move(emulated);
+            ++wpad_count;
         }
     }
     {

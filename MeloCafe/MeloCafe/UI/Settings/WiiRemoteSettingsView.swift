@@ -215,7 +215,7 @@ struct WiiRemoteSettingsView: View {
     }
     private func remoteDetail(_ slot: UInt8, connected: Bool) -> String {
         guard connected else { return bridge.disconnectedRemoteSlots.contains(slot) ? "Disconnected" : "Asleep" }
-        let player = (bridge.connectedSlots.firstIndex(of: slot) ?? 0) + otherWPADCount + 1
+        let player = (bridge.playerNumber(for: slot) ?? 1) + otherWPADCount
         let features = bridge.features[slot] ?? 0
         var parts = ["Player \(player)"]
         if features & 1 != 0 { parts.append("MotionPlus") }

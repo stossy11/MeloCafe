@@ -127,6 +127,15 @@ public:
 		m_accMagnitude = sqrtf(m_acc[0] * m_acc[0] + m_acc[1] * m_acc[1] + m_acc[2] * m_acc[2]);
 	}
 
+    // Freeze movement during a transport gap without destroying orientation/gravity.
+    MotionSample stationary() const
+    {
+        auto result = *this;
+        result.m_gyro[0] = result.m_gyro[1] = result.m_gyro[2] = 0;
+        result.m_accAcceleration = 0;
+        return result;
+    }
+
     // Convert the physical Wii/iOS sensor convention to the game's horizontal
     // convention at the output boundary. Keep fusion in a proper rotation frame.
     MotionSample withReversedHorizontalAxes() const

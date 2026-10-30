@@ -79,6 +79,7 @@ enum StatusBitmask : uint8
 
 enum OutputReportId : uint8
 {
+    kRumble = 0x10,
 	kLED = 0x11,
 	kType = 0x12,
 	kIR = 0x13,

@@ -36,6 +36,7 @@ public:
 
 	bool is_connected(size_t index);
 	bool is_registered_device(size_t index);
+    std::optional<size_t> preferred_player_index(size_t index);
 	void set_rumble(size_t index, bool state);
 	void request_status(size_t index);
 	void calibrate_gyro(size_t index, bool start);

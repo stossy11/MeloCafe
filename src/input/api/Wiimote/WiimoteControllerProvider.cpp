@@ -15,6 +15,8 @@
 #include "input/api/Wiimote/BLEWiimoteDevice.h"
 #endif
 
+#include "input/api/Wiimote/WiiInputSafety.h"
+
 #include <numbers>
 #include <queue>
 
@@ -150,16 +152,24 @@ bool WiimoteControllerProvider::is_registered_device(size_t index)
 	return index < m_wiimotes.size();
 }
 
+std::optional<size_t> WiimoteControllerProvider::preferred_player_index(size_t index)
+{
+    std::shared_lock lock(m_device_mutex);
+    if (index < m_wiimotes.size() && m_wiimotes[index].device)
+        return m_wiimotes[index].device->preferred_player_index();
+    return {};
+}
+
 void WiimoteControllerProvider::set_rumble(size_t index, bool state)
 {
 	std::shared_lock lock(m_device_mutex);
 	if (index >= m_wiimotes.size())
 		return;
 	
-	m_wiimotes[index].rumble = state;
+	if (m_wiimotes[index].rumble.exchange(state) == state) return;
 	lock.unlock();
 
-	send_packet(index, { kStatusRequest, 0x00 });
+	send_packet(index, { kRumble, 0x00 });
 }
 
 void WiimoteControllerProvider::calibrate_gyro(size_t index, bool start)
@@ -208,7 +218,10 @@ WiimoteControllerProvider::WiimoteState WiimoteControllerProvider::get_state(siz
 	if (index < m_wiimotes.size())
 	{
 		std::shared_lock data_lock(m_wiimotes[index].mutex);
-		return m_wiimotes[index].state;
+        auto state = m_wiimotes[index].state;
+        if (m_wiimotes[index].device && m_wiimotes[index].device->input_is_stale())
+            NeutralizeWiiInput(state);
+        return state;
 	}
 
 	return {};
@@ -607,15 +620,19 @@ void WiimoteControllerProvider::writer_thread()
 			auto& wiimote = m_wiimotes[index];
 			if (!wiimote.device)
 				continue;
-			if (wiimote.rumble)
-				data[1] |= 1;
-			if (!wiimote.device->write_data(data))
-			{
-				wiimote.disconnected = true;
-				wiimote.rumble = false;
-			}
-			else
-				wiimote.data_ts = std::chrono::high_resolution_clock::now();
+            data[1] = (data[1] & ~1u) | unsigned(wiimote.rumble.load());
+            const auto result = wiimote.device->try_write_data(data);
+            if (result == WiimoteWriteResult::Disconnected) {
+                wiimote.disconnected = true;
+                wiimote.rumble = false;
+            } else {
+                // Pace retries too, keeping other remotes serviceable while full.
+                wiimote.data_ts = std::chrono::high_resolution_clock::now();
+                if (result == WiimoteWriteResult::WouldBlock) {
+                    std::scoped_lock retryLock(m_writer_mutex);
+                    m_write_queue.emplace_front(index, std::move(data));
+                }
+            }
 		}
 		device_lock.unlock();
 
@@ -706,7 +723,14 @@ void WiimoteControllerProvider::send_packet(size_t index, std::vector<uint8> dat
 	// The writer validates the index under m_device_mutex. The reader also
 	// queues commands while holding that mutex, so do not acquire it recursively.
 	std::unique_lock lock(m_writer_mutex);
-	m_write_queue.emplace_back(index, data);
+    // State-setting output without ACKs can be superseded; memory and setup
+    // commands retain their order. Rumble is applied from the latest atomic state.
+    if (data[0] == kRumble || (data[0] == kLED && (data[1] & 2) == 0)) {
+        std::erase_if(m_write_queue, [&](const auto& packet) {
+            return packet.first == index && packet.second[0] == data[0] && (packet.second[1] & 2) == 0;
+        });
+    }
+	m_write_queue.emplace_back(index, std::move(data));
 	m_writer_cond.notify_one();
 }
 
