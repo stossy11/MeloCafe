@@ -307,6 +307,7 @@ int main(int argc, char *argv[])
 }
 #endif
 
+#if BOOST_OS_IOS
 extern "C" DLLEXPORT uint64 gameMeta_getTitleId()
 {
 	return CafeSystem::GetForegroundTitleId();
@@ -582,3 +583,4 @@ void CemuShutdown()
 }
 
 }
+#endif // BOOST_OS_IOS

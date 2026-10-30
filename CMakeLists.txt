@@ -283,6 +283,7 @@ endif()
 
 if (ENABLE_WXWIDGETS)
 	find_package(wxWidgets 3.3 REQUIRED COMPONENTS base core gl propgrid xrc)
+	add_compile_definitions(ENABLE_WXWIDGETS)
 endif()
 
 if (ENABLE_CUBEB)

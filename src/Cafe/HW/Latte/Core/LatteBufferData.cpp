@@ -198,7 +198,7 @@ bool LatteBufferCache_Sync(uint32 minIndex, uint32 maxIndex, uint32 baseInstance
 			fixedBufferSize += 128;
 
 
-#if BOOST_OS_MACOS || BOOST_OS_IOS && defined(ENABLE_VULKAN)
+#if (BOOST_OS_MACOS || BOOST_OS_IOS) && defined(ENABLE_VULKAN)
 		if(bufferStride % 4 != 0)
 		{
 		    if (g_renderer->GetType() == RendererAPI::Vulkan)

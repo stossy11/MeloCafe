@@ -17,6 +17,7 @@
 .idea/
 
 build/
+build-macos/
 cmake-build-*/
 out/
 .cache/
@@ -30,6 +31,7 @@ bin/log.txt
 bin/Cemu_*.pdb
 bin/Cemu_*.ilk
 bin/Cemu.exe.backup
+bin/Cemu
 bin/mlc01/*
 bin/settings.xml
 bin/network_services.xml

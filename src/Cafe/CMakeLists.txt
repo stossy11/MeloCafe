@@ -553,10 +553,12 @@ if (ENABLE_VULKAN)
 endif()
 
 if(APPLE)
-	target_sources(CemuCafe PRIVATE
-	    HW/Latte/Renderer/MetalView.mm
-	    HW/Latte/Renderer/MetalView.h
-	)
+	if(IOS)
+		target_sources(CemuCafe PRIVATE
+		    HW/Latte/Renderer/MetalView.mm
+		    HW/Latte/Renderer/MetalView.h
+		)
+	endif()
 	if (ENABLE_VULKAN)
 		target_sources(CemuCafe PRIVATE
 		    HW/Latte/Renderer/Vulkan/CocoaSurface.mm
