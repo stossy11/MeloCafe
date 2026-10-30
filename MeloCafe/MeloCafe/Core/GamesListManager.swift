@@ -20,12 +20,34 @@ class GamesManager: ObservableObject {
 
     @Published var games: [GameInfoSwift] = []
     @Published var startedEmulation: Bool = false
+    @Published private(set) var pinnedGameIDs: Set<UInt64>
 
+    private static let pinnedGamesKey = "pinnedGameIDs"
     private let fileManager = FileManager.default
     public static let shared = GamesManager()
 
     private init() {
+        let savedIDs = UserDefaults.standard.stringArray(forKey: Self.pinnedGamesKey) ?? []
+        pinnedGameIDs = Set(savedIDs.compactMap { UInt64($0) })
+    }
 
+    var orderedGames: [GameInfoSwift] {
+        // Keep the library's existing order within each group.
+        games.filter { isPinned($0) } + games.filter { !isPinned($0) }
+    }
+
+    func isPinned(_ game: GameInfoSwift) -> Bool {
+        pinnedGameIDs.contains(game.id)
+    }
+
+    func togglePin(_ game: GameInfoSwift) {
+        if isPinned(game) {
+            pinnedGameIDs.remove(game.id)
+        } else {
+            pinnedGameIDs.insert(game.id)
+        }
+        // Strings preserve the full UInt64 title ID in UserDefaults.
+        UserDefaults.standard.set(pinnedGameIDs.sorted().map { String($0) }, forKey: Self.pinnedGamesKey)
     }
 
     func loadGames()  {
@@ -36,6 +58,7 @@ class GamesManager: ObservableObject {
         }
 
         var count: Int32 = 0
+        var loadedGames: [GameInfoSwift] = []
 
         if let gamesPtr = CemuGetAllGames(false, false, &count) {
             let gamesArray = UnsafeBufferPointer(start: gamesPtr, count: Int(count))
@@ -48,13 +71,14 @@ class GamesManager: ObservableObject {
                     icon: Data()
                 )
                 gameInfo.icon = CemuManager.loadGameIcon(game.titleId) ?? Data()
-                self.games.append(gameInfo)
+                loadedGames.append(gameInfo)
             }
 
             CemuFreeGameList(gamesPtr, count)
         } else {
             print("No games found.")
         }
+        games = loadedGames
     }
 
     func loadGame(_ game: String, _ load: Bool = false) {

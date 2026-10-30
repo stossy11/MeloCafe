@@ -28,6 +28,7 @@ enum CardType: String, Codable, CaseIterable {
 
 struct GameCardView: View {
     let game: GameInfoSwift
+    var isPinned: Bool = false
     let onLaunch: (GameInfoSwift) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("cardType") var cardTypeRawValue: String = CardType.list.rawValue
@@ -121,6 +122,18 @@ struct GameCardView: View {
                 smallGrid
             case .compactCardSmall:
                 wiiUCard
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(7)
+                    .background(.regularMaterial, in: Circle())
+                    .padding(6)
+                    .accessibilityLabel("Pinned")
+                    .allowsHitTesting(false)
             }
         }
         .task {

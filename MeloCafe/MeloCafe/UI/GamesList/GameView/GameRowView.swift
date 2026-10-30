@@ -9,6 +9,7 @@ import SwiftUI
 
 struct GameRowView: View {
     let game: GameInfoSwift
+    var isPinned: Bool = false
     let onLaunch: (GameInfoSwift) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -19,6 +20,12 @@ struct GameRowView: View {
             HStack(spacing: 16) {
                 gameIcon
                 gameInfo
+                if isPinned {
+                    Spacer()
+                    Image(systemName: "pin.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Pinned")
+                }
             }
         }
         .buttonStyle(.plain)

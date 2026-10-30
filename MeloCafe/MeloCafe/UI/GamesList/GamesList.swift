@@ -76,8 +76,8 @@ struct GamesListView: View {
     
     @ViewBuilder
     var list: some View {
-        List(gamesList.games) { game in
-            GameRowView(game: game) { launched in
+        List(gamesList.orderedGames) { game in
+            GameRowView(game: game, isPinned: gamesList.isPinned(game)) { launched in
                 gamesList.loadGame(launched)
             }
             .contextMenu {
@@ -100,8 +100,8 @@ struct GamesListView: View {
             
             
             LazyVGrid(columns: columns, spacing: columns.first?.spacing ?? 16) {
-                ForEach(gamesList.games) { game in
-                    GameCardView(game: game) { launched in
+                ForEach(gamesList.orderedGames) { game in
+                    GameCardView(game: game, isPinned: gamesList.isPinned(game)) { launched in
                         gamesList.loadGame(launched)
                     }
                     .id(game.id)
