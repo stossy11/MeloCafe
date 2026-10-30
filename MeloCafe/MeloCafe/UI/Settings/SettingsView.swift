@@ -361,6 +361,14 @@ struct SettingsView: View {
                     Toggle("Debug", isOn: configManager.overlayDebug)
                 }
                 
+                Section {
+                    Toggle("Dump Textures and Shaders", isOn: configManager.dumpGraphicsAssets)
+                } header: {
+                    Text("Graphics Diagnostics")
+                } footer: {
+                    Text("For timing, enable Overlay → Debug; summaries are written to log.txt once per second. For visual glitches, enable dumping before launching a game, then find the dump folder in MeloCafe’s files. Dumping slows gameplay and uses storage, so keep it off for timing runs. It turns off when the app closes.")
+                }
+
                 Section("Notifications") {
                     Picker("Position", selection: configManager.notificationPosition) {
                         ForEach(ScreenPosition.allCases, id: \.self) {

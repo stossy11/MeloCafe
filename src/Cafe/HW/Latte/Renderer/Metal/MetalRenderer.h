@@ -599,6 +599,11 @@ private:
 
 	void SwapBuffer(bool mainWindow);
 
+    void ReportPerformance();
+    std::array<double, 19> m_diagnosticTotals{};
+    uint32 m_diagnosticFrames = 0;
+    uint32 m_diagnosticStart = 0;
+
 	void EnsureImGuiBackend();
 
 	// GPU capture

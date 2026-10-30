@@ -22,6 +22,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteConst.h"
 #include "config/CemuConfig.h"
+#include "config/ActiveSettings.h"
 #include "WindowSystem.h"
 
 #include <cstring>
@@ -427,7 +428,10 @@ void MetalRenderer::SwapBuffers(bool swapTV, bool swapDRC)
     // Reset the command buffers (they are released by TemporaryBufferAllocator)
     CommitCommandBuffer();
 
-    // Debug
+    // The common timers have been finalized at the emulated frame boundary.
+    m_performanceMonitor.m_queryWait.frameFinished();
+    m_performanceMonitor.m_flushWait.frameFinished();
+    ReportPerformance();
     m_performanceMonitor.ResetPerFrameData();
 
     // GPU capture
@@ -590,6 +594,7 @@ void MetalRenderer::Flush(bool waitIdle)
 
     if (waitIdle && m_executingCommandBuffers.size() != 0)
     {
+        MetalScopedTimer timer(m_performanceMonitor.m_flushWait, GetConfig().overlay.debug);
         m_executingCommandBuffers.back()->waitUntilCompleted();
         ProcessFinishedCommandBuffers();
     }
@@ -702,8 +707,86 @@ void MetalRenderer::DeleteFontTextures()
     ImGui_ImplMetal_DestroyFontsTexture();
 }
 
+void MetalRenderer::ReportPerformance()
+{
+    if (!GetConfig().overlay.debug)
+    {
+        m_diagnosticFrames = 0;
+        m_diagnosticStart = 0;
+        m_diagnosticTotals.fill(0.0);
+        return;
+    }
+
+    const uint32 now = GetTickCount();
+    if (m_diagnosticStart == 0 || LatteGPUState.frameCounter <= 5)
+    {
+        m_diagnosticStart = now;
+        return;
+    }
+
+    const auto milliseconds = [](LattePerfStatTimer& timer) {
+        return PPCTimer_tscToMicroseconds(timer.getPreviousFrameValue()) / 1000.0;
+    };
+    const std::array<double, 19> values = {
+        milliseconds(performanceMonitor.gpuTime_frameTime),
+        milliseconds(performanceMonitor.gpuTime_idleTime),
+        milliseconds(performanceMonitor.gpuTime_fenceTime),
+        milliseconds(performanceMonitor.gpuTime_waitForAsync),
+        milliseconds(performanceMonitor.gpuTime_dcStageTextures),
+        milliseconds(performanceMonitor.gpuTime_dcStageDrawcallAPI),
+        milliseconds(performanceMonitor.gpuTime_dcStageVertexMgr),
+        milliseconds(performanceMonitor.gpuTime_dcStageIndexMgr),
+        milliseconds(performanceMonitor.gpuTime_dcStageMRT),
+        milliseconds(m_performanceMonitor.m_queryWait),
+        milliseconds(m_performanceMonitor.m_flushWait),
+        double(m_performanceMonitor.m_commandBuffers),
+        double(m_performanceMonitor.m_renderPasses),
+        double(m_performanceMonitor.m_queryCount),
+        double(m_performanceMonitor.m_readbackCount),
+        double(m_performanceMonitor.m_textureUploads),
+        m_performanceMonitor.m_textureUploadBytes / 1024.0,
+        m_performanceMonitor.m_snapshotBytes / 1024.0,
+        double(m_performanceMonitor.m_meshDraws),
+    };
+    for (size_t i = 0; i < values.size(); ++i)
+        m_diagnosticTotals[i] += values[i];
+    ++m_diagnosticFrames;
+
+    const uint32 elapsed = now - m_diagnosticStart;
+    if (elapsed < 1000)
+        return;
+
+    // Draw includes buffer, index, pipeline and some wait time; do not sum these
+    // columns. Frame excludes presentation, while fps uses wall-clock time.
+    static constexpr std::array<const char*, 19> labels = {
+        "frame_ms", "idle_ms", "fence_ms", "readback_processing_ms",
+        "textures_ms", "draw_ms", "buffers_ms", "indices_ms", "pipeline_ms",
+        "query_wait_ms", "flush_wait_ms", "command_buffers", "render_passes",
+        "queries", "readbacks", "texture_uploads", "texture_KiB", "snapshot_KiB", "mesh_draws",
+    };
+    std::string summary;
+    for (size_t i = 0; i < values.size(); ++i)
+        summary += fmt::format(" {}={:.2f}", labels[i], m_diagnosticTotals[i] / m_diagnosticFrames);
+    cemuLog_log(LogType::Force, "[Metal timing] title={:016x} frames={} fps={:.2f} CPU-ms/counts per frame (nested):{} asset_dump={}",
+        CafeSystem::GetForegroundTitleId(), m_diagnosticFrames, m_diagnosticFrames * 1000.0 / elapsed, summary,
+        ActiveSettings::DumpTexturesEnabled() || ActiveSettings::DumpShadersEnabled());
+    m_diagnosticTotals.fill(0.0);
+    m_diagnosticFrames = 0;
+    m_diagnosticStart = now;
+}
+
 void MetalRenderer::AppendOverlayDebugInfo()
 {
+    const auto milliseconds = [](LattePerfStatTimer& timer) {
+        return PPCTimer_tscToMicroseconds(timer.getPreviousFrameValue()) / 1000.0;
+    };
+    ImGui::Text("--- Render thread CPU time (ms/frame) ---");
+    ImGui::Text("Frame / command idle       %.2f / %.2f", milliseconds(performanceMonitor.gpuTime_frameTime), milliseconds(performanceMonitor.gpuTime_idleTime));
+    ImGui::Text("Textures / draw execution  %.2f / %.2f", milliseconds(performanceMonitor.gpuTime_dcStageTextures), milliseconds(performanceMonitor.gpuTime_dcStageDrawcallAPI));
+    ImGui::Text("  Buffers / indices / pipe %.2f / %.2f / %.2f", milliseconds(performanceMonitor.gpuTime_dcStageVertexMgr), milliseconds(performanceMonitor.gpuTime_dcStageIndexMgr), milliseconds(performanceMonitor.gpuTime_dcStageMRT));
+    ImGui::Text("Fence / readback processing %.2f / %.2f", milliseconds(performanceMonitor.gpuTime_fenceTime), milliseconds(performanceMonitor.gpuTime_waitForAsync));
+    ImGui::Text("Queries / readbacks        %u / %u", m_performanceMonitor.m_queryCount, m_performanceMonitor.m_readbackCount);
+    ImGui::Text("Texture uploads            %u (%llu KB)", m_performanceMonitor.m_textureUploads, static_cast<unsigned long long>(m_performanceMonitor.m_textureUploadBytes / 1024));
     ImGui::Text("--- GPU info ---");
     ImGui::Text("GPU                        %s", m_device->name()->utf8String());
     ImGui::Text("Is Apple GPU               %s", (m_isAppleGPU ? "yes" : "no"));
@@ -852,6 +935,8 @@ static DepthStencilUploadLayout GetDepthStencilUploadLayout(Latte::E_GX2SURFFMT 
 // TODO: do a cpu copy on Apple Silicon?
 void MetalRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, sint32 height, sint32 depth, void* pixelData, sint32 sliceIndex, sint32 mipIndex, uint32 compressedImageSize)
 {
+    m_performanceMonitor.m_textureUploads++;
+    m_performanceMonitor.m_textureUploadBytes += compressedImageSize;
     auto textureMtl = (LatteTextureMtl*)hostTexture;
 
     uint32 offsetZ = 0;
@@ -1403,7 +1488,10 @@ void MetalRenderer::draw_beginSequence()
     bool streamoutEnable = LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0;
 
     // update shader state
-    LatteSHRC_UpdateActiveShaders();
+    {
+        MetalScopedTimer timer(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr, GetConfig().overlay.debug);
+        LatteSHRC_UpdateActiveShaders();
+    }
     if (LatteGPUState.activeShaderHasError)
     {
         cemuLog_logOnce(LogType::Force, "Skipping drawcalls due to shader error\n");
@@ -1413,6 +1501,7 @@ void MetalRenderer::draw_beginSequence()
     }
 
     // update render target and texture state
+    MetalScopedTimer textureTimer(performanceMonitor.gpuTime_dcStageTextures, GetConfig().overlay.debug);
     LatteGPUState.requiresTextureBarrier = false;
     while (true)
     {
@@ -1448,6 +1537,7 @@ void MetalRenderer::draw_beginSequence()
 
 void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
 {
+    MetalScopedTimer drawTimer(performanceMonitor.gpuTime_dcStageDrawcallAPI, GetConfig().overlay.debug);
     if (m_state.m_skipDrawSequence)
     {
         LatteGPUState.drawCallCounter++;
@@ -1511,7 +1601,10 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     uint32 indexMin = 0;
     uint32 indexMax = 0;
     Renderer::IndexAllocation indexAllocation;
-    LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexAllocation);
+    {
+        MetalScopedTimer timer(performanceMonitor.gpuTime_dcStageIndexMgr, GetConfig().overlay.debug);
+        LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexAllocation);
+    }
     auto indexAllocationMtl = static_cast<MetalSynchronizedHeapAllocator::AllocatorReservation*>(indexAllocation.rendererInternal);
     const sint32 signedBaseVertex = static_cast<sint32>(baseVertex);
     m_state.m_drawResources.indexBuffer = indexAllocationMtl ? indexAllocationMtl->mtlBuffer : nullptr;
@@ -1532,24 +1625,27 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     }
 
     // Buffer cache
-    if (m_memoryManager->UseHostMemoryForCache())
     {
-        // direct memory access (Wii U memory space imported as a buffer), update buffer bindings
-        LatteBufferCache_processDCFlushQueue();
-        LatteBufferCache_processDeallocations();
-        draw_updateVertexBuffersDirectAccess(minVertexIndex, maxVertexIndex, baseInstance, instanceCount, fetchVertexManually);
-        if (vertexShader)
-            draw_updateUniformBuffersDirectAccess(vertexShader, mmSQ_VTX_UNIFORM_BLOCK_START);
-        if (geometryShader)
-            draw_updateUniformBuffersDirectAccess(geometryShader, mmSQ_GS_UNIFORM_BLOCK_START);
-        if (pixelShader)
-            draw_updateUniformBuffersDirectAccess(pixelShader, mmSQ_PS_UNIFORM_BLOCK_START);
-    }
-    else
-    {
-        // synchronize vertex and uniform cache and update buffer bindings
-        // We need to call this before getting the render command encoder, since it can cause buffer copies
-        LatteBufferCache_Sync(minVertexIndex, maxVertexIndex, baseInstance, instanceCount);
+        MetalScopedTimer timer(performanceMonitor.gpuTime_dcStageVertexMgr, GetConfig().overlay.debug);
+        if (m_memoryManager->UseHostMemoryForCache())
+        {
+            // direct memory access (Wii U memory space imported as a buffer), update buffer bindings
+            LatteBufferCache_processDCFlushQueue();
+            LatteBufferCache_processDeallocations();
+            draw_updateVertexBuffersDirectAccess(minVertexIndex, maxVertexIndex, baseInstance, instanceCount, fetchVertexManually);
+            if (vertexShader)
+                draw_updateUniformBuffersDirectAccess(vertexShader, mmSQ_VTX_UNIFORM_BLOCK_START);
+            if (geometryShader)
+                draw_updateUniformBuffersDirectAccess(geometryShader, mmSQ_GS_UNIFORM_BLOCK_START);
+            if (pixelShader)
+                draw_updateUniformBuffersDirectAccess(pixelShader, mmSQ_PS_UNIFORM_BLOCK_START);
+        }
+        else
+        {
+            // synchronize vertex and uniform cache and update buffer bindings
+            // We need to call this before getting the render command encoder, since it can cause buffer copies
+            LatteBufferCache_Sync(minVertexIndex, maxVertexIndex, baseInstance, instanceCount);
+        }
     }
 
     PrepareUniformBufferSizes(vertexShader);
@@ -1561,7 +1657,11 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     auto renderCommandEncoder = GetRenderCommandEncoder();
 
     // Render pipeline state
-    PipelineObject* pipelineObj = m_pipelineCache->GetRenderPipelineState(fetchShader, vertexShader, geometryShader, pixelShader, m_state.m_lastUsedFBO.m_attachmentsInfo, m_state.m_activeFBO.m_attachmentsInfo, m_state.m_activeFBO.m_fbo->m_size, count, LatteGPUState.contextNew);
+    PipelineObject* pipelineObj;
+    {
+        MetalScopedTimer timer(performanceMonitor.gpuTime_dcStageMRT, GetConfig().overlay.debug);
+        pipelineObj = m_pipelineCache->GetRenderPipelineState(fetchShader, vertexShader, geometryShader, pixelShader, m_state.m_lastUsedFBO.m_attachmentsInfo, m_state.m_activeFBO.m_attachmentsInfo, m_state.m_activeFBO.m_fbo->m_size, count, LatteGPUState.contextNew);
+    }
     if (!pipelineObj->m_pipeline)
         return;
 
@@ -2019,6 +2119,7 @@ void MetalRenderer::indexData_uploadIndexMemory(IndexAllocation& allocation)
 }
 
 LatteQueryObject* MetalRenderer::occlusionQuery_create() {
+    m_performanceMonitor.m_queryCount++;
     auto* query = new LatteQueryObjectMtl(this);
     m_occlusionQuery.m_queries.push_back(query);
     return query;
@@ -2047,7 +2148,10 @@ void MetalRenderer::PrepareOcclusionQueryDraw()
     {
 
         if (!CommandBufferCompleted(completion))
+        {
+            MetalScopedTimer timer(m_performanceMonitor.m_queryWait, GetConfig().overlay.debug);
             completion->waitUntilCompleted();
+        }
 
         for (auto* query : m_occlusionQuery.m_queries)
             query->AccumulateBuffer(nextBuffer);
@@ -2061,6 +2165,7 @@ void MetalRenderer::PrepareOcclusionQueryDraw()
 }
 
 void MetalRenderer::occlusionQuery_flush() {
+    MetalScopedTimer timer(m_performanceMonitor.m_queryWait, GetConfig().overlay.debug);
     CommitCommandBuffer();
     if (m_occlusionQuery.m_lastCommandBuffer)
         m_occlusionQuery.m_lastCommandBuffer->waitUntilCompleted();
