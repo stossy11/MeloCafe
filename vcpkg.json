@@ -62,6 +62,15 @@
       ]
     }
   ],
+  "features": {
+    "desktop": {
+      "description": "Dependencies for the native desktop debugging frontend",
+      "dependencies": [
+        "boost-filesystem",
+        "wxwidgets"
+      ]
+    }
+  },
   "overrides": [
     {
       "name": "glslang",

@@ -186,7 +186,7 @@ void CemuApp::DeterminePaths(std::set<fs::path>& failedWriteAccess) // for MacOS
 	{
 		isPortable = true;
 		user_data_path = config_path = cache_path = portablePath;
-		data_path = exePath.parent_path();
+		data_path = appPath.extension() == ".app" ? appPath / "Contents" / "SharedSupport" : exePath.parent_path();
 	}
 	else
 #endif
