@@ -174,6 +174,8 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL overlayRAMUsage;
 @property (nonatomic) BOOL overlayVRAMUsage;
 @property (nonatomic) BOOL overlayDebug;
+// Diagnostic asset dumping is opt-in for the current app session only.
+@property (nonatomic) BOOL dumpGraphicsAssets;
 
 @property (nonatomic) ObjCScreenPosition notificationPosition;
 @property (nonatomic) uint32_t notificationTextColor;

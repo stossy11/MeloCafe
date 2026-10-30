@@ -336,6 +336,30 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)overlayDebug                       { return GetConfig().overlay.debug; }
 - (void)setOverlayDebug:(BOOL)v            { GetConfig().overlay.debug = v; autoSave(); }
 
+- (BOOL)dumpGraphicsAssets
+{
+    return ActiveSettings::DumpTexturesEnabled() && ActiveSettings::DumpShadersEnabled();
+}
+
+- (void)setDumpGraphicsAssets:(BOOL)enabled
+{
+    if (enabled)
+    {
+        for (const char* directory : {"dump/textures", "dump/shaders"})
+        {
+            std::error_code error;
+            fs::create_directories(ActiveSettings::GetUserDataPath(directory), error);
+            if (error)
+            {
+                cemuLog_log(LogType::Force, "Cannot create graphics dump directory {}: {}", directory, error.message());
+                return;
+            }
+        }
+    }
+    ActiveSettings::EnableDumpTextures(enabled);
+    ActiveSettings::EnableDumpShaders(enabled);
+}
+
 - (ObjCScreenPosition)notificationPosition { return (ObjCScreenPosition)GetConfig().notification.position; }
 - (void)setNotificationPosition:(ObjCScreenPosition)v { GetConfig().notification.position = (ScreenPosition)v; autoSave(); }
 

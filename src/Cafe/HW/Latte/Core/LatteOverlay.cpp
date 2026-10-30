@@ -98,7 +98,7 @@ void LatteOverlay_renderOverlay(ImVec2& position, ImVec2& pivot, sint32 directio
 	const ImVec4 color = ImGui::ColorConvertU32ToFloat4(config.overlay.text_color);
 	ImGui::PushStyleColor(ImGuiCol_Text, color);
 	// stats overlay
-	if (config.overlay.fps || config.overlay.drawcalls || config.overlay.cpu_usage || config.overlay.cpu_per_core_usage || config.overlay.ram_usage)
+	if (config.overlay.fps || config.overlay.drawcalls || config.overlay.cpu_usage || config.overlay.cpu_per_core_usage || config.overlay.ram_usage || config.overlay.vram_usage || config.overlay.debug)
 	{
 		ImGui::SetNextWindowPos(position, ImGuiCond_Always, pivot);
 		ImGui::SetNextWindowBgAlpha(kBackgroundAlpha);
