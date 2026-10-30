@@ -42,9 +42,11 @@ LatteTextureMtl::LatteTextureMtl(class MetalRenderer* mtlRenderer, Latte::E_DIM 
         textureType = MTL::TextureType3D;
         break;
     case Latte::E_DIM::DIM_CUBEMAP:
-        cemu_assert_debug(effectiveBaseDepth % 6 == 0 && "cubemaps must have an array length multiple of 6");
-
-        textureType = MTL::TextureTypeCubeArray;
+        // Surface copies can create a cache entry for only the first few
+        // faces. Keep those faces in a 2D array until the cache expands to a
+        // complete cubemap; dividing a partial face count by six can be zero.
+        textureType = (effectiveBaseDepth % 6 == 0 && effectiveBaseWidth == effectiveBaseHeight)
+            ? MTL::TextureTypeCubeArray : MTL::TextureType2DArray;
         break;
     default:
         cemu_assert_unimplemented();

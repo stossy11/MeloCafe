@@ -149,9 +149,12 @@ MTL::Texture* LatteTextureViewMtl::CreateSwizzledView(uint32 gpuSamplerSwizzle)
         textureType = MTL::TextureType3D;
         break;
     case Latte::E_DIM::DIM_CUBEMAP:
-        cemu_assert_debug(this->numSlice % 6 == 0 && "cubemaps must have an array length multiple of 6");
-
-        textureType = MTL::TextureTypeCubeArray;
+        // A partial cubemap cache entry still gets a whole-texture base view.
+        // It is used for copies, while cube sampling requests a complete set
+        // of six faces and causes the cache to expand the backing texture.
+        textureType = (firstSlice % 6 == 0 && this->numSlice % 6 == 0 &&
+                       m_baseTexture->GetTexture()->width() == m_baseTexture->GetTexture()->height())
+            ? MTL::TextureTypeCubeArray : MTL::TextureType2DArray;
         break;
     default:
         cemu_assert_unimplemented();
