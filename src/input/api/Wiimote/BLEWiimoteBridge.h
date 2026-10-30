@@ -12,12 +12,16 @@ uint64_t WiiRemoteBridge_add(void);
 void WiiRemoteBridge_remove(uint64_t handle);
 bool WiiRemoteBridge_receive(uint64_t handle, const uint8_t* report, size_t length);
 bool WiiRemoteBridge_receiveTimed(uint64_t handle, const uint8_t* report, size_t length, uint32_t timestamp_us);
+// Continuous-input safety timeout; default 500 ms, zero disables it.
+void WiiRemoteBridge_setInputTimeout(uint64_t handle, uint32_t milliseconds);
 // Peek/consume lets the BLE client retry when its write queue is full.
 size_t WiiRemoteBridge_peekOutput(uint64_t handle, uint8_t* report, size_t capacity);
 void WiiRemoteBridge_consumeOutput(uint64_t handle);
 void WiiRemoteBridge_notifyChanged(void);
 // Highest-priority connected handle first. Does not replace transports or reset calibration.
 bool WiiRemoteBridge_setPlayerOrder(const uint64_t* handles, size_t count);
+// Exactly four player ports; zero is vacant. Connected players keep their port.
+bool WiiRemoteBridge_setPlayerSlots(const uint64_t* handles, size_t count);
 // Bits: 0 MotionPlus active, 1 Nunchuck, 2 Classic, 3 gyro zero calibrated.
 uint8_t WiiRemoteBridge_features(uint64_t handle);
 

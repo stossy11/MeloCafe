@@ -2,6 +2,7 @@
 #include "input/api/Wiimote/BLEWiimoteBridge.h"
 #include <algorithm>
 #include <deque>
+#include <chrono>
 #include <map>
 #include <mutex>
 
@@ -28,23 +29,47 @@ size_t InputReportSize(uint8_t id)
 class BLEWiimoteDevice final : public WiimoteDevice
 {
 public:
-	bool write_data(const std::vector<uint8_t>& data) override
-	{
-		std::scoped_lock lock(m_mutex);
-		if (!m_connected || data.empty() || data.size() > 22 || m_output.size() >= kQueueLimit)
-			return false;
-		m_output.push_back(data);
-		return true;
-	}
+    bool write_data(const std::vector<uint8_t>& data) override {
+        return try_write_data(data) == WiimoteWriteResult::Sent;
+    }
+    WiimoteWriteResult try_write_data(const std::vector<uint8_t>& data) override {
+        std::scoped_lock lock(m_mutex);
+        if (!m_connected || data.size() < 2 || data.size() > 22) return WiimoteWriteResult::Disconnected;
+        if (m_output.size() >= kQueueLimit) return WiimoteWriteResult::WouldBlock;
+        m_output.push_back(data);
+        return WiimoteWriteResult::Sent;
+    }
+    bool input_is_stale() const override {
+        std::scoped_lock lock(m_mutex);
+        return !m_connected || (m_inputTimeout.count() > 0 &&
+            std::chrono::steady_clock::now() - m_lastSample >= m_inputTimeout);
+    }
+    std::optional<size_t> preferred_player_index() const override {
+        std::scoped_lock lock(m_mutex);
+        return m_playerIndex;
+    }
+    void SetPlayerIndex(size_t player) {
+        std::scoped_lock lock(m_mutex);
+        m_playerIndex = player;
+    }
+    void SetInputTimeout(uint32_t milliseconds) {
+        std::scoped_lock lock(m_mutex);
+        m_inputTimeout = std::chrono::milliseconds(milliseconds);
+    }
 
 	std::optional<std::vector<uint8_t>> read_data() override
 	{
 		std::scoped_lock lock(m_mutex);
 		if (!m_connected) return std::nullopt;
+        // A stalled main thread must not replay seconds of obsolete button state.
+        const auto now = std::chrono::steady_clock::now();
+        while (!m_input.empty() && m_input.front().bytes[0] >= 0x30 &&
+               now - m_input.front().received > std::chrono::milliseconds(100)) m_input.pop_front();
 		if (m_input.empty()) return std::vector<uint8_t>{};
 		auto report = std::move(m_input.front());
 		m_input.pop_front();
         m_lastTimestamp = report.timestamp;
+        if (report.bytes[0] >= 0x30) m_lastSample = report.received;
 		return report.bytes;
 	}
 
@@ -86,7 +111,7 @@ public:
 			if (sample != m_input.end()) m_input.erase(sample);
 			else return report[0] >= 0x30;
 		}
-		m_input.push_back({std::vector<uint8_t>(report, report + length), timestamp});
+		m_input.push_back({std::vector<uint8_t>(report, report + length), timestamp, std::chrono::steady_clock::now()});
 		return true;
 	}
 
@@ -109,10 +134,17 @@ public:
     void SetFeatures(uint8_t features) { std::scoped_lock lock(m_mutex); m_features = features; }
     uint8_t GetFeatures() const { std::scoped_lock lock(m_mutex); return m_connected ? m_features : 0; }
 private:
+    std::optional<size_t> m_playerIndex;
     uint8_t m_features = 0;
 	mutable std::mutex m_mutex;
 	bool m_connected = true;
-    struct Packet { std::vector<uint8_t> bytes; std::optional<uint32_t> timestamp; };
+    struct Packet {
+        std::vector<uint8_t> bytes;
+        std::optional<uint32_t> timestamp;
+        std::chrono::steady_clock::time_point received;
+    };
+    std::chrono::milliseconds m_inputTimeout{500};
+    std::chrono::steady_clock::time_point m_lastSample{};
     std::optional<uint32_t> m_lastTimestamp;
     std::deque<Packet> m_input;
     std::deque<std::vector<uint8_t>> m_output;
@@ -152,8 +184,26 @@ extern "C" bool WiiRemoteBridge_setPlayerOrder(const uint64_t* handles, size_t c
 		if (!s_devices.contains(handles[i]) || std::find(order.begin(), order.end(), handles[i]) != order.end()) return false;
 		order.push_back(handles[i]);
 	}
+    for (size_t player = 0; player < order.size(); ++player) s_devices.at(order[player])->SetPlayerIndex(player);
 	s_playerOrder = std::move(order);
 	return true;
+}
+
+extern "C" bool WiiRemoteBridge_setPlayerSlots(const uint64_t* handles, size_t count)
+{
+    std::scoped_lock lock(s_registryMutex);
+    if (count != 4 || !handles) return false;
+    std::vector<uint64_t> active;
+    for (size_t player = 0; player < count; ++player) {
+        if (!handles[player]) continue;
+        if (!s_devices.contains(handles[player]) || std::find(active.begin(), active.end(), handles[player]) != active.end()) return false;
+        active.push_back(handles[player]);
+    }
+    if (active.size() != s_devices.size()) return false;
+    for (size_t player = 0; player < count; ++player)
+        if (handles[player]) s_devices.at(handles[player])->SetPlayerIndex(player);
+    s_playerOrder.assign(handles, handles + count);
+    return true;
 }
 
 extern "C" uint64_t WiiRemoteBridge_add()
@@ -207,4 +257,9 @@ extern "C" uint8_t WiiRemoteBridge_features(uint64_t handle)
 {
     const auto device = FindDevice(handle);
     return device ? device->GetFeatures() : 0;
+}
+
+extern "C" void WiiRemoteBridge_setInputTimeout(uint64_t handle, uint32_t milliseconds)
+{
+    if (const auto device = FindDevice(handle)) device->SetInputTimeout(milliseconds);
 }
