@@ -192,6 +192,8 @@ static inline uint32 ppc_getCR(PPCInterpreter_t* hCPU)
 
 void PPCInterpreter_invalidateBlockCache();
 void PPCInterpreter_invalidateBlockCacheRange(uint32 addr, uint32 size);
+void PPCInterpreter_predecodeRange(uint32 addr, uint32 size);
+void PPCInterpreter_predecodeGeneratedRange(uint32 addr, uint32 size);
 
 // FPU helper
 

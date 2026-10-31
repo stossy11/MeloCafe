@@ -33,42 +33,44 @@ struct GraphicPacksView: View {
     }
     
     var body: some View {
-        List {
-            Section {
-                if viewModel.isDownloading {
-                    VStack(spacing: 8) {
-                        Text(viewModel.downloadStage)
-                            .font(.subheadline)
-                        ProgressView(value: viewModel.downloadProgress)
+        NavigationStack {
+            List {
+                Section {
+                    if viewModel.isDownloading {
+                        VStack(spacing: 8) {
+                            Text(viewModel.downloadStage)
+                                .font(.subheadline)
+                            ProgressView(value: viewModel.downloadProgress)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        Button {
+                            viewModel.downloadPacks()
+                        } label: {
+                            Label("Download latest graphic packs", systemImage: "arrow.down.circle")
+                        }
                     }
-                    .padding(.vertical, 4)
-                } else {
-                    Button {
-                        viewModel.downloadPacks()
-                    } label: {
-                        Label("Download latest graphic packs", systemImage: "arrow.down.circle")
+                    
+                    if let error = viewModel.downloadError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
                 
-                if let error = viewModel.downloadError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-            
-            ForEach(groupedPacks, id: \.0) { group, packs in
-                Section(group) {
-                    ForEach(packs) { pack in
-                        GraphicPackRow(pack: pack, viewModel: viewModel)
+                ForEach(groupedPacks, id: \.0) { group, packs in
+                    Section(group) {
+                        ForEach(packs) { pack in
+                            GraphicPackRow(pack: pack, viewModel: viewModel)
+                        }
                     }
                 }
             }
-        }
-        .searchable(text: $searchText, prompt: "Search graphic packs")
-        .navigationTitle("Graphic Packs")
-        .onAppear {
-            viewModel.refresh()
+            .searchable(text: $searchText, prompt: "Search graphic packs")
+            .navigationTitle("Graphic Packs")
+            .onAppear {
+                viewModel.refresh()
+            }
         }
     }
 }

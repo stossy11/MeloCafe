@@ -1,24 +1,90 @@
 #include "util/SystemInfo/SystemInfo.h"
+#include "Cafe/HW/MMU/MMU.h"
 
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <mach/mach.h>
 
 #include <mach/processor_info.h>
 #include <mach/mach_host.h>
 #include <mach/kern_return.h>
 
+
 // borrowed from https://en.wikichip.org/wiki/resident_set_size#OS_X
-uint64 QueryRamUsage()
+task_vm_info_data_t QueryRamUsage()
 {
-	mach_task_basic_info info;
-	mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-	if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
-		return info.resident_size;
-	return 0;
+    task_vm_info_data_t info{};
+	mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    
+	if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+		return info;
+    
+	return {};
 }
+
+std::function<uint64()> PrepareGuestRamUsageQuery()
+{
+	if (!memory_base)
+		return [] { return uint64{0}; };
+
+	const long hostPageSize = sysconf(_SC_PAGESIZE);
+	if (hostPageSize <= 0)
+		return [] { return uint64{0}; };
+	const uintptr_t pageSize = static_cast<uintptr_t>(hostPageSize);
+    
+    
+	std::vector<std::pair<uintptr_t, uintptr_t>> ranges;
+	for (const auto* range : memory_getMMURanges())
+	{
+		if (!range->isMapped() || range->getSize() == 0 || range->areaId == MMU_MEM_AREA_ID::CEMU_PRIVATE)
+			continue;
+		const uintptr_t begin = reinterpret_cast<uintptr_t>(memory_base) + range->getBase();
+		
+		const uintptr_t end = begin + range->getSize();
+		
+		ranges.emplace_back(begin - begin % pageSize, ((end + pageSize - 1) / pageSize) * pageSize);
+	}
+	std::sort(ranges.begin(), ranges.end());
+
+	return [ranges = std::move(ranges), pageSize]() -> uint64 {
+		uint64 residentBytes = 0;
+		uintptr_t previousEnd = 0;
+		char residency[4096];
+		for (const auto& [begin, end] : ranges)
+		{
+			uintptr_t address = std::max(begin, previousEnd);
+			previousEnd = std::max(previousEnd, end);
+			while (address < end)
+			{
+				const size_t pages = std::min<size_t>((end - address) / pageSize, sizeof(residency));
+				
+				if (mincore(reinterpret_cast<char*>(address), pages * pageSize, residency) != 0)
+					return 0;
+				for (size_t i = 0; i < pages; ++i)
+				{
+					if (residency[i] & MINCORE_INCORE)
+						residentBytes += pageSize;
+				}
+				address += pages * pageSize;
+			}
+		}
+		return residentBytes;
+	};
+}
+
+uint64 QueryGuestRamUsage()
+{
+	return PrepareGuestRamUsageQuery()();
+}
+
+
+
 
 // apple official documentation is non-existsent.
 // based on https://github.com/giampaolo/psutil/blob/master/psutil/_psutil_osx.c#L623

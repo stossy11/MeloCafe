@@ -7,6 +7,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/GameProfile/GameProfile.h"
+#include "Cafe/HW/MMU/MMU.h"
 
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 #ifdef ENABLE_VULKAN
@@ -176,7 +177,6 @@ bool LatteBufferCache_Sync(uint32 minIndex, uint32 maxIndex, uint32 baseInstance
 		uint32 bufferIndex = bufferGroup.attributeBufferIndex;
 		uint32 bufferBaseRegisterIndex = mmSQ_VTX_ATTRIBUTE_BLOCK_START + bufferIndex * 7;
 		MPTR bufferAddress = LatteGPUState.contextRegister[bufferBaseRegisterIndex + 0];
-		uint32 bufferSize = LatteGPUState.contextRegister[bufferBaseRegisterIndex + 1] + 1;
 		uint32 bufferStride = (LatteGPUState.contextRegister[bufferBaseRegisterIndex + 2] >> 11) & 0xFFFF;
 
 		if (bufferAddress == MPTR_NULL)
@@ -186,19 +186,25 @@ bool LatteBufferCache_Sync(uint32 minIndex, uint32 maxIndex, uint32 baseInstance
 		}
 
 		// dont rely on buffer size given by game
-		uint32 fixedBufferSize = 0;
+		uint64 requiredSize = 0;
 		if (bufferGroup.hasVtxIndexAccess)
-			fixedBufferSize = bufferStride * (maxIndex + 1) + bufferGroup.maxOffset;
+			requiredSize = uint64(bufferStride) * (uint64(maxIndex) + 1) + bufferGroup.maxOffset;
 		if (bufferGroup.hasInstanceIndexAccess)
 		{
-			uint32 fixedBufferSizeInstance = bufferStride * ((baseInstance + instanceCount) + 1) + bufferGroup.maxOffset;
-			fixedBufferSize = std::max(fixedBufferSize, fixedBufferSizeInstance);
+			uint64 instanceSize = uint64(bufferStride) * (uint64(baseInstance) + instanceCount + 1) + bufferGroup.maxOffset;
+			requiredSize = std::max(requiredSize, instanceSize);
 		}
-		if (fixedBufferSize == 0 || bufferStride == 0)
-			fixedBufferSize += 128;
+		if (requiredSize == 0 || bufferStride == 0)
+			requiredSize += 128;
+		
+		if (requiredSize > UINT32_MAX || uint64(bufferAddress) + requiredSize + 0x3ff > UINT32_MAX)
+			return false;
+		uint32 fixedBufferSize = static_cast<uint32>(requiredSize);
+		if (!memory_isAddressRangeAccessible(bufferAddress, fixedBufferSize))
+			return false;
 
 
-#if BOOST_OS_MACOS || BOOST_OS_IOS && defined(ENABLE_VULKAN)
+#if (BOOST_OS_MACOS || BOOST_OS_IOS) && defined(ENABLE_VULKAN)
 		if(bufferStride % 4 != 0)
 		{
 		    if (g_renderer->GetType() == RendererAPI::Vulkan)

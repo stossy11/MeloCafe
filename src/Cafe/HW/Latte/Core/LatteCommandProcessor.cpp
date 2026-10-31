@@ -7,6 +7,8 @@
 #include "Cafe/HW/Latte/Core/LatteDraw.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteAsyncCommands.h"
+#include "Cafe/HW/Latte/Core/LatteTiming.h"
+#include "Cafe/HW/Latte/Core/LatteWorkEvent.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/HW/Latte/Core/LatteIndices.h"
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
@@ -139,7 +141,7 @@ void LatteCP_signalEnterWait()
 
 /*
 * Read a U32 from the command buffer
-* If no data is available then wait in a busy loop
+* If no data is available, wait for work or the next timed GPU event.
 */
 uint32 LatteCP_readU32Deprc()
 {
@@ -150,6 +152,7 @@ uint32 LatteCP_readU32Deprc()
 		if ( TCL::TCLGPUReadRBWord(cmdWord) )
 			return cmdWord;
 
+		const auto workGeneration = Latte_GetWorkEvent().Snapshot();
 		g_renderer->NotifyLatteCommandProcessorIdle(); // let the renderer know in case it wants to flush any commands
 		performanceMonitor.gpuTime_idleTime.beginMeasuring();
 		// no command data available, spin in a busy loop for a bit then check again
@@ -170,7 +173,15 @@ uint32 LatteCP_readU32Deprc()
 		// still no command data available, do some other tasks
 		LatteTiming_HandleTimedVsync();
 		LatteAsyncCommands_checkAndExecute();
-		std::this_thread::yield();
+		// Recheck after taking the snapshot so a submission before the snapshot
+		// cannot leave queued commands sleeping until the next VSync.
+		if (TCL::TCLGPUReadRBWord(cmdWord))
+		{
+			performanceMonitor.gpuTime_idleTime.endMeasuring();
+			return cmdWord;
+		}
+		Latte_GetWorkEvent().WaitUntil(workGeneration, LatteTiming_GetNextVsyncDeadline(),
+			g_renderer->GetIdleSubmissionDeadline());
 		performanceMonitor.gpuTime_idleTime.endMeasuring();
 	}
 	UNREACHABLE;
@@ -914,14 +925,19 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 	uint32 currentFlipCount = LatteGPUState.flipCounter;
 	while (true)
 	{
-		_mm_pause();
+		const auto workGeneration = Latte_GetWorkEvent().Snapshot();
 		if (currentFlipCount != LatteGPUState.flipCounter)
 		{
 			break;
 		}
 		// check if any GPU events happened
 		LatteTiming_HandleTimedVsync();
-		std::this_thread::yield();
+		g_renderer->NotifyLatteCommandProcessorIdle();
+		if (Latte_GetStopSignal())
+			LatteThread_Exit();
+		if (currentFlipCount == LatteGPUState.flipCounter)
+			Latte_GetWorkEvent().WaitUntil(workGeneration, LatteTiming_GetNextVsyncDeadline(),
+				g_renderer->GetIdleSubmissionDeadline());
 	}
 	return cmd;
 }

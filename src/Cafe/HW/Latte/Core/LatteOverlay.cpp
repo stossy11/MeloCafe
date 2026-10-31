@@ -1,6 +1,7 @@
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
+#include "Cafe/HW/MMU/MMU.h"
 #include "Cafe/Account/Account.h"
 #include "config/CemuConfig.h"
 #include "config/ActiveSettings.h"
@@ -14,6 +15,8 @@
 #include "util/SystemInfo/SystemInfo.h"
 
 #include <cinttypes>
+#include <chrono>
+#include <future>
 
 struct OverlayStats
 {
@@ -29,9 +32,28 @@ struct OverlayStats
 	float cpu_usage{}; // cemu cpu usage in %
 	std::vector<float> cpu_per_core; // global cpu usage in % per core
 	uint32 ram_usage{}; // ram usage in MB
+    uint32 base_ram_usage{}; // memory_base ram usage in MB
 
 	int vramUsage{}, vramTotal{}; // vram usage in mb
 } g_state{};
+
+static std::future<OverlayStats> g_pendingStats;
+
+static void PublishCompletedStats()
+{
+	if (!g_pendingStats.valid() ||
+		g_pendingStats.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+		return;
+
+	auto stats = g_pendingStats.get();
+	g_state.processor_count = stats.processor_count;
+	g_state.processor_time_cemu = stats.processor_time_cemu;
+	g_state.processor_times = std::move(stats.processor_times);
+	g_state.cpu_usage = stats.cpu_usage;
+	g_state.cpu_per_core = std::move(stats.cpu_per_core);
+	g_state.ram_usage = stats.ram_usage;
+	g_state.base_ram_usage = stats.base_ram_usage;
+}
 
 extern std::atomic_int g_compiled_shaders_total;
 extern std::atomic_int g_compiled_shaders_async;
@@ -84,6 +106,9 @@ void LatteOverlay_renderOverlay(ImVec2& position, ImVec2& pivot, sint32 directio
 		{
 			if (config.overlay.fps)
 				ImGui::Text("FPS: %.2lf", g_state.fps);
+            
+            if (config.overlay.cpu_mode)
+                ImGui::Text("CPU Mode: %s", fmt::format("{}", config.cpu_mode.GetValue()).c_str());
 
 			if (config.overlay.drawcalls)
 				ImGui::Text("Draws/f: %d (fast: %d)", g_state.draw_calls_per_frame, g_state.fast_draw_calls_per_frame);
@@ -100,8 +125,12 @@ void LatteOverlay_renderOverlay(ImVec2& position, ImVec2& pivot, sint32 directio
 				}
 			}
 
-			if (config.overlay.ram_usage)
-				ImGui::Text("RAM: %dMB", g_state.ram_usage);
+            if (config.overlay.ram_usage)
+            {
+                ImGui::Text("RAM: %dMB", g_state.ram_usage);
+                if (s_donatedMemory.base)
+                    ImGui::Text("Guest RAM: %dMB", g_state.base_ram_usage);
+            }
 
 			if(config.overlay.vram_usage && g_state.vramUsage != -1 && g_state.vramTotal != -1)
 				ImGui::Text("VRAM: %dMB / %dMB", g_state.vramUsage, g_state.vramTotal);
@@ -514,6 +543,7 @@ void LatteOverlay_translateScreenPosition(ScreenPosition pos, const Vector2f& wi
 
 void LatteOverlay_render(bool pad_view)
 {
+	PublishCompletedStats();
 	const auto& config = GetConfig();
 	if(config.overlay.position == ScreenPosition::kDisabled && config.notification.position == ScreenPosition::kDisabled)
 		return;
@@ -569,43 +599,43 @@ void LatteOverlay_init()
 	g_state.cpu_per_core.resize(g_state.processor_count);
 }
 
-static void UpdateStats_CemuCpu()
+static void UpdateStats_CemuCpu(OverlayStats& stats)
 {
 	ProcessorTime now;
 	QueryProcTime(now);
 	
-	double cpu = ProcessorTime::Compare(g_state.processor_time_cemu, now);
-	cpu /= std::max(1, g_state.processor_count);
+	double cpu = ProcessorTime::Compare(stats.processor_time_cemu, now);
+	cpu /= std::max(1, stats.processor_count);
 	
-	g_state.cpu_usage = cpu * 100;
-	g_state.processor_time_cemu = now;
+	stats.cpu_usage = cpu * 100;
+	stats.processor_time_cemu = now;
 }
 
-static void UpdateStats_CpuPerCore()
+static void UpdateStats_CpuPerCore(OverlayStats& stats)
 {
-	std::vector<ProcessorTime> now(g_state.processor_times.size());
+	std::vector<ProcessorTime> now(stats.processor_times.size());
 	QueryCoreTimes(now);
 	if (now.empty())
 	{
-		g_state.processor_count = 0;
-		g_state.processor_times.clear();
-		g_state.cpu_per_core.clear();
+		stats.processor_count = 0;
+		stats.processor_times.clear();
+		stats.cpu_per_core.clear();
 		return;
 	}
 
-	if (g_state.processor_times.size() != now.size())
+	if (stats.processor_times.size() != now.size())
 	{
-		g_state.processor_count = (int)now.size();
-		g_state.processor_times.resize(now.size());
-		g_state.cpu_per_core.resize(now.size());
+		stats.processor_count = (int)now.size();
+		stats.processor_times.resize(now.size());
+		stats.cpu_per_core.resize(now.size());
 	}
 
-	for (int32_t i = 0; i < g_state.processor_count; ++i)
+	for (int32_t i = 0; i < stats.processor_count; ++i)
 	{
-		double cpu = ProcessorTime::Compare(g_state.processor_times[i], now[i]);
+		double cpu = ProcessorTime::Compare(stats.processor_times[i], now[i]);
 
-		g_state.cpu_per_core[i] = cpu * 100;
-		g_state.processor_times[i] = now[i];
+		stats.cpu_per_core[i] = cpu * 100;
+		stats.processor_times[i] = now[i];
 	}
 }
 
@@ -618,15 +648,39 @@ void LatteOverlay_updateStats(double fps, sint32 drawcalls, sint32 fastDrawcalls
 	g_state.draw_calls_per_frame = drawcalls;
 	g_state.fast_draw_calls_per_frame = fastDrawcalls;
 
+	PublishCompletedStats();
 	const auto& overlay = GetConfig().overlay;
-	if (overlay.cpu_usage)
-		UpdateStats_CemuCpu();
-	if (overlay.cpu_per_core_usage)
-		UpdateStats_CpuPerCore();
-
-	// update ram
-	if (overlay.ram_usage)
-		g_state.ram_usage = (QueryRamUsage() / 1000) / 1000;
+	if (!g_pendingStats.valid() && (overlay.cpu_usage || overlay.cpu_per_core_usage || overlay.ram_usage))
+	{
+#if __APPLE__
+		// Capture mapping metadata before the worker scans page residency.
+		auto guestRamQuery = overlay.ram_usage ? PrepareGuestRamUsageQuery() : std::function<uint64()>{};
+#endif
+		// Only one sample can be in flight; the worker owns its stats snapshot.
+		g_pendingStats = std::async(std::launch::async,
+			[stats = g_state, cpu = overlay.cpu_usage, cores = overlay.cpu_per_core_usage,
+			 ram = overlay.ram_usage
+#if __APPLE__
+			 , guestRamQuery = std::move(guestRamQuery)
+#endif
+			 ]() mutable {
+				if (cpu)
+					UpdateStats_CemuCpu(stats);
+				if (cores)
+					UpdateStats_CpuPerCore(stats);
+				if (ram)
+				{
+#if __APPLE__
+					stats.ram_usage = static_cast<uint32>(QueryRamUsage().phys_footprint / 1000000ULL);
+					stats.base_ram_usage = static_cast<uint32>(guestRamQuery() / 1000000ULL);
+#else
+					stats.ram_usage = static_cast<uint32>(QueryRamUsage() / 1000000ULL);
+					stats.base_ram_usage = static_cast<uint32>(QueryGuestRamUsage() / 1000000ULL);
+#endif
+				}
+				return stats;
+			});
+	}
 
 	// update vram
 	if (overlay.vram_usage && g_renderer)

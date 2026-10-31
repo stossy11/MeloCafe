@@ -359,6 +359,7 @@ struct IMLInstruction
 
 	uint8 type;
 	uint8 operation;
+	bool compareResultOnlyUsedByBranch = false;
 	union
 	{
 		struct
@@ -628,6 +629,7 @@ struct IMLInstruction
 	void make_compare(IMLReg regA, IMLReg regB, IMLReg regR, IMLCondition cond)
 	{
 		this->type = PPCREC_IML_TYPE_COMPARE;
+		this->compareResultOnlyUsedByBranch = false;
 		this->operation = PPCREC_IML_OP_INVALID;
 		this->op_compare.regR = regR;
 		this->op_compare.regA = regA;
@@ -638,6 +640,7 @@ struct IMLInstruction
 	void make_compare_s32(IMLReg regA, sint32 immS32, IMLReg regR, IMLCondition cond)
 	{
 		this->type = PPCREC_IML_TYPE_COMPARE_S32;
+		this->compareResultOnlyUsedByBranch = false;
 		this->operation = PPCREC_IML_OP_INVALID;
 		this->op_compare_s32.regR = regR;
 		this->op_compare_s32.regA = regA;

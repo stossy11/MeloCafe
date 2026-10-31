@@ -45,7 +45,7 @@ namespace LatteDecompiler
 		else if (shaderContext->shader->textureUnitDim[textureUnit] == Latte::E_DIM::DIM_2D_ARRAY)
 			src->add("2d_array<float>");
 		else if (shaderContext->shader->textureUnitDim[textureUnit] == Latte::E_DIM::DIM_CUBEMAP)
-			src->add("cube_array<float>");
+			src->add(static_cast<MetalRenderer*>(g_renderer.get())->SupportsCubeMapArrays() ? "cube_array<float>" : "cube<float>");
 		else if (shaderContext->shader->textureUnitDim[textureUnit] == Latte::E_DIM::DIM_3D)
 			src->add("3d<float>");
 		else

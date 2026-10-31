@@ -17,8 +17,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	list(PREPEND VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_LIST_DIR}/triplets")
 	list(REMOVE_DUPLICATES VCPKG_OVERLAY_TRIPLETS)
 	set(VCPKG_OVERLAY_TRIPLETS "${VCPKG_OVERLAY_TRIPLETS}" CACHE STRING "Project vcpkg overlay triplets" FORCE)
+
+if(CMAKE_OSX_SYSROOT STREQUAL "iphonesimulator")
+	set(VCPKG_TARGET_TRIPLET "arm64-ios-simulator" CACHE STRING "vcpkg target triplet" FORCE)
+else()
 	set(VCPKG_TARGET_TRIPLET "arm64-ios" CACHE STRING "vcpkg target triplet" FORCE)
 endif()
+
+endif()
+
 
 execute_process(
 		COMMAND git log --format=%h -1
@@ -146,7 +153,7 @@ option(ENABLE_OPENGL "Enables the OpenGL backend" ${ENABLE_OPENGL_DEFAULT})
 option(ENABLE_VULKAN "Enables the Vulkan backend" ON)
 option(ENABLE_METAL "Enables the Metal backend" ${ENABLE_METAL_DEFAULT})
 option(ENABLE_DISCORD_RPC "Enables the Discord Rich Presence feature" ON)
-option(ENABLE_IOS_NATIVE_RECORDING "Enables lightweight in-app Metal recording on iOS" ON)
+option(ENABLE_APPSTORE "Causes all Private API usages to be subbed out." OFF)
 
 if (IOS)
 	set(ENABLE_OPENGL OFF CACHE BOOL "OpenGL is not supported on iOS" FORCE)
@@ -155,11 +162,17 @@ if (IOS)
 	set(ENABLE_DISCORD_RPC OFF CACHE BOOL "Discord RPC is not available on iOS" FORCE)
 	set(ENABLE_HIDAPI OFF CACHE BOOL "HIDAPI is not available on iOS" FORCE)
 	set(ENABLE_LIBUSB OFF CACHE BOOL "libusb is not available on iOS" FORCE)
+	set(BUILD_HEADLESS_DYLIB ON CACHE BOOL "Build CemuBin as a framework on iOS" FORCE)
 endif()
 
 if (ENABLE_METAL AND NOT APPLE)
     message(FATAL_ERROR "Metal backend is only supported on Apple platforms")
 endif()
+
+if (ENABLE_APPSTORE AND NOT APPLE) 
+	set(ENABLE_APPSTORE OFF CACHE BOOL "This is only needed for Apple platforms." FORCE)
+endif()
+
 
 # input backends
 if (WIN32)
@@ -194,6 +207,11 @@ option(ENABLE_CUBEB "Enabled cubeb backend" ${ENABLE_CUBEB_DEFAULT})
 option(ENABLE_WXWIDGETS "Build with wxWidgets UI" ${ENABLE_WXWIDGETS_DEFAULT})
 
 find_package(Threads REQUIRED)
+
+if(CMAKE_GENERATOR STREQUAL "Xcode")
+	set(Z_VCPKG_OPENSSL_USE_SINGLE_CONFIG 1)
+endif()
+
 find_package(CURL REQUIRED)
 find_package(pugixml REQUIRED)
 find_package(RapidJSON REQUIRED)
@@ -259,6 +277,12 @@ if (ENABLE_METAL)
     add_compile_definitions(ENABLE_METAL)
 endif()
 
+if (ENABLE_APPSTORE)
+	# forces stuff like disabling debugger checking, entitlement checking, etc
+	add_compile_definitions(DIST_APPSTORE)
+endif()
+
+
 if (IOS AND ENABLE_IOS_NATIVE_RECORDING)
 	add_compile_definitions(ENABLE_IOS_NATIVE_RECORDING)
 endif()
@@ -314,6 +338,18 @@ endif()
 find_package(ZArchive QUIET)
 if (NOT ZArchive_FOUND)
 	add_subdirectory("dependencies/ZArchive" EXCLUDE_FROM_ALL)
+endif()
+
+# Profile guided optimization (clang only): CEMU_PGO_PROFILE=/path/to/cemu.profdata optimizes with a merged profile.
+set(CEMU_PGO_PROFILE "" CACHE FILEPATH "Merged .profdata file to optimize with")
+if (CEMU_PGO_PROFILE)
+	if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "PGO options need clang")
+	endif()
+	if (NOT EXISTS "${CEMU_PGO_PROFILE}")
+		message(FATAL_ERROR "CEMU_PGO_PROFILE ${CEMU_PGO_PROFILE} does not exist")
+	endif()
+	add_compile_options("-fprofile-instr-use=${CEMU_PGO_PROFILE}" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
 endif()
 
 add_subdirectory(src)

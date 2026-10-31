@@ -17,7 +17,6 @@ struct ContentView: View {
     let cemuPadView: MetalView
     @EnvironmentObject private var gameManager: GamesManager
 
-
     var body: some View {
         Group {
             if gameManager.startedEmulation {

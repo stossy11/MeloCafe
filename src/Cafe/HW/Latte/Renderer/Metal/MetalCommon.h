@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdio>
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
 
@@ -241,4 +242,22 @@ inline bool UseRectEmulation(const LatteContextRegister& lcr) {
 
 inline bool UseGeometryShader(const LatteContextRegister& lcr, bool hasGeometryShader) {
     return hasGeometryShader || UseRectEmulation(lcr);
+}
+
+inline void LogMetalTextureDiagnostic(std::string_view message)
+{
+    std::fwrite(message.data(), 1, message.size(), stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+    cemuLog_log(LogType::Force, message);
+    cemuLog_waitForFlush();
+}
+
+inline void LogMetalTextureDescriptor(const char* operation, const MTL::TextureDescriptor* desc)
+{
+    LogMetalTextureDiagnostic(fmt::format(
+        "Metal texture {}: type={} pixelFormat={} size={}x{}x{} arrayLength={} mipLevels={} samples={} usage=0x{:x} storageMode={}",
+        operation, static_cast<uint32>(desc->textureType()), static_cast<uint32>(desc->pixelFormat()),
+        desc->width(), desc->height(), desc->depth(), desc->arrayLength(), desc->mipmapLevelCount(),
+        desc->sampleCount(), static_cast<uint32>(desc->usage()), static_cast<uint32>(desc->storageMode())));
 }

@@ -3,6 +3,8 @@
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteSurfaceCopy.h"
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
+#include "Cafe/HW/Latte/Core/LatteWorkEvent.h"
+#include <atomic>
 
 void LatteThread_Exit();
 
@@ -51,6 +53,7 @@ typedef struct
 #define ASYNC_CMD_TEXTURE_COPY					3
 
 std::queue<LatteAsyncCommand_t> LatteAsyncCommandQueue;
+static std::atomic<uint32> s_pendingAsyncCommands{0};
 
 void LatteAsyncCommands_queueForceTextureReadback(MPTR physAddr, MPTR mipAddr, uint32 swizzle, sint32 format, sint32 width, sint32 height, sint32 depth, uint32 pitch, uint32 slice, sint32 dim, Latte::E_HWTILEMODE tilemode, sint32 aa, sint32 level)
 {
@@ -73,7 +76,9 @@ void LatteAsyncCommands_queueForceTextureReadback(MPTR physAddr, MPTR mipAddr, u
 	asyncCommand.forceTextureReadback.level = level;
 	swl_gpuAsyncCommands.LockWrite();
 	LatteAsyncCommandQueue.push(asyncCommand);
+	s_pendingAsyncCommands.fetch_add(1, std::memory_order::release);
 	swl_gpuAsyncCommands.UnlockWrite();
+	Latte_GetWorkEvent().Notify();
 }
 
 void LatteAsyncCommands_queueDeleteShader(uint64 shaderBaseHash, uint64 shaderAuxHash, LatteConst::ShaderType shaderType)
@@ -88,7 +93,9 @@ void LatteAsyncCommands_queueDeleteShader(uint64 shaderBaseHash, uint64 shaderAu
 
 	swl_gpuAsyncCommands.LockWrite();
 	LatteAsyncCommandQueue.push(asyncCommand);
+	s_pendingAsyncCommands.fetch_add(1, std::memory_order::release);
 	swl_gpuAsyncCommands.UnlockWrite();
+	Latte_GetWorkEvent().Notify();
 }
 
 void LatteAsyncCommand_queueTextureCopy(const LatteSurfaceCopyParam& src, const LatteSurfaceCopyParam& dst, const LatteSurfaceCopyRect& rect)
@@ -102,14 +109,23 @@ void LatteAsyncCommand_queueTextureCopy(const LatteSurfaceCopyParam& src, const 
 
 	swl_gpuAsyncCommands.LockWrite();
 	LatteAsyncCommandQueue.push(asyncCommand);
+	s_pendingAsyncCommands.fetch_add(1, std::memory_order::release);
 	swl_gpuAsyncCommands.UnlockWrite();
+	Latte_GetWorkEvent().Notify();
 }
 
 void LatteAsyncCommands_waitUntilAllProcessed()
 {
-	while (LatteAsyncCommandQueue.empty() == false)
+	uint32 spinCount = 0;
+	while (uint32 pending = s_pendingAsyncCommands.load(std::memory_order::acquire))
 	{
-		_mm_pause();
+		if (spinCount++ < 80)
+			_mm_pause();
+		else
+		{
+			s_pendingAsyncCommands.wait(pending, std::memory_order::acquire);
+			spinCount = 0;
+		}
 	}
 }
 
@@ -118,10 +134,10 @@ void LatteAsyncCommands_waitUntilAllProcessed()
  */
 void LatteAsyncCommands_checkAndExecute()
 {
-	// quick check if queue is empty (requires no lock)
+	// inspect the atomic count rather than accessing std::queue without its lock.
 	if (Latte_GetStopSignal())
 		LatteThread_Exit();
-	if (LatteAsyncCommandQueue.empty())
+	if (s_pendingAsyncCommands.load(std::memory_order::acquire) == 0)
 		return;
 	swl_gpuAsyncCommands.LockWrite();
 	while (LatteAsyncCommandQueue.empty() == false)
@@ -160,6 +176,8 @@ void LatteAsyncCommands_checkAndExecute()
 		}
 		swl_gpuAsyncCommands.LockWrite();
 		LatteAsyncCommandQueue.pop();
+		s_pendingAsyncCommands.fetch_sub(1, std::memory_order::release);
+		s_pendingAsyncCommands.notify_all();
 	}
 	swl_gpuAsyncCommands.UnlockWrite();
 }

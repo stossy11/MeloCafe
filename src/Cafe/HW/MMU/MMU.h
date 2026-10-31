@@ -53,6 +53,14 @@ enum class MMU_MEM_AREA_ID
 	CEMU_PRIVATE,
 };
 
+struct DonatedMemory
+{
+    void* base = nullptr;
+    uint64_t size = 0;
+};
+
+static DonatedMemory s_donatedMemory;
+
 struct MMURange
 {
 	enum MFLAG
@@ -215,6 +223,7 @@ void memory_writeU32(uint32 address, uint32 v);
 void memory_writeU16(uint32 address, uint16 v);
 void memory_writeU8(uint32 address, uint8 v);
 void memory_writeU64(uint32 address, uint64 v);
+void offer_donated_mem(uint8* base, uint64_t size);
 
 double memory_readDouble(uint32 address);
 float memory_readFloat(uint32 address);

@@ -165,10 +165,24 @@ MMURange mmuRange_CORE1_LC				{ 0xFFC40000, 0x00005000, MMU_MEM_AREA_ID::CPU_LC1
 MMURange mmuRange_CORE2_LC				{ 0xFFC80000, 0x00005000, MMU_MEM_AREA_ID::CPU_LC2, "CORE2_LC" }; // locked L2 cache of core 2
 MMURange mmuRange_HIGHMEM				{ 0xFFFFF000, 0x00001000, MMU_MEM_AREA_ID::CPU_PER_CORE, "PER-CORE" }; // per-core memory? Used by coreinit and PPC kernel to store core context specific data (like current thread ptr). We dont use it but Project Zero has a bug where it writes a byte at 0xfffffffe thus this memory range needs to be writable
 
+#if BOOST_OS_IOS
+void offer_donated_mem(uint8* base, uint64_t size) {
+    s_donatedMemory.base = base;
+    s_donatedMemory.size = size;
+}
+#endif
+
 void memory_init()
 {
+    // if donated memory isn't enabled, it'll just be null and MemMaper::ReserveMemory will catch it so no need for an if statement
+    memory_base = (uint8*)s_donatedMemory.base;
+    
+    if (memory_base)
+        cemuLog_log(LogType::Force, "Donated Memory Enabled: {}, size {:#x}", s_donatedMemory.base, s_donatedMemory.size);
+        
 	if (!memory_base)
 		memory_base = (uint8*)MemMapper::ReserveMemory(nullptr, size_t{0x100000000ULL}, MemMapper::PAGE_PERMISSION::P_RW);
+    
 #if BOOST_OS_IOS
 	if (!memory_base)
 	{

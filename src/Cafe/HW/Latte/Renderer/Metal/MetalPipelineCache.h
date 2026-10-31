@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineCompiler.h"
+#include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineStateKey.h"
 #include "util/helpers/ConcurrentQueue.h"
 #include "util/helpers/fspinlock.h"
 #include "util/math/vector2.h"
@@ -29,6 +30,8 @@ private:
     class MetalRenderer* m_mtlr;
 
     std::map<uint64, PipelineObject*> m_pipelineCache;
+    MetalPipelineStateKey m_lastPipelineKey{};
+    PipelineObject* m_lastPipelineObject = nullptr;
     FSpinlock m_pipelineCacheLock;
 
 	std::thread* m_pipelineCacheStoreThread;

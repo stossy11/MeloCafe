@@ -26,6 +26,11 @@ struct DualMapRegion
 
 struct JITAlloc { void* rw; void* rx; };
 
+#if defined(__aarch64__)
+void PPCRecompiler_suspendSingleMapExecution();
+void PPCRecompiler_resumeSingleMapExecution();
+#endif
+
 struct PPCRecFunction_t
 {
 	struct JumpTableEntry
@@ -41,6 +46,12 @@ struct PPCRecFunction_t
 	void*  x86Code; // pointer to x86 code
     void*  x86CodeWritable = nullptr;
     DualMapRegion dualMapRegion{}; // pointer to arm code
+	struct DirectLink
+	{
+		uint32 destination;
+		size_t offset;
+	};
+	std::vector<DirectLink> directLinks; // ARM64 patch sites, owned by this function
 	size_t x86Size;
 	std::vector<ppcRecRange_t> list_ranges;
 	boost::container::small_vector<JumpTableEntry, 2> jumpTableEntries;

@@ -8,6 +8,7 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalAttachmentsInfo.h"
 
 #include <unordered_map>
+#include <chrono>
 
 enum MetalGeneralShaderType
 {
@@ -76,6 +77,9 @@ struct MetalEncoderState
    	uint32 m_depthSlope = 0;
    	uint32 m_depthClamp = 0;
     bool m_depthClipEnable = true;
+    bool m_visibilityResultValid = false;
+    MTL::VisibilityResultMode m_visibilityResultMode = MTL::VisibilityResultModeDisabled;
+    size_t m_visibilityResultOffset = 0;
     struct {
         MTL::Buffer* m_buffer;
         size_t m_offset;
@@ -210,6 +214,7 @@ public:
 	// flush control
 	void Flush(bool waitIdle = false) override;		// called when explicit flush is required (e.g. by imgui)
 	void NotifyLatteCommandProcessorIdle() override; // called when command processor has no more commands available or when stalled
+	std::chrono::steady_clock::time_point GetIdleSubmissionDeadline() const override;
 
 	// imgui
 	bool ImguiBegin(bool mainWindow) override;
@@ -273,7 +278,7 @@ public:
 	void draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst) override;
 	void draw_endSequence() override;
 
-    void draw_updateVertexBuffersDirectAccess(uint32 minIndex, uint32 maxIndex, uint32 baseInstance, uint32 instanceCount, bool fetchVertexManually);
+    bool draw_updateVertexBuffersDirectAccess(uint32 minIndex, uint32 maxIndex, uint32 baseInstance, uint32 instanceCount, bool fetchVertexManually);
 	void draw_updateUniformBuffersDirectAccess(LatteDecompilerShader* shader, const uint32 uniformBufferRegOffset);
     void PrepareUniformBufferSizes(LatteDecompilerShader* shader);
 
@@ -397,6 +402,11 @@ public:
         return m_isAppleGPU;
     }
 
+    bool SupportsCubeMapArrays() const
+    {
+        return m_supportsCubeMapArrays;
+    }
+
     bool SupportsFramebufferFetch() const
     {
         return m_supportsFramebufferFetch;
@@ -496,6 +506,7 @@ public:
     }
 
 private:
+	static constexpr auto s_idleBatchMaxAge = std::chrono::microseconds(250);
 	MetalLayerHandle m_mainLayer;
 	MetalLayerHandle m_padLayer;
 
@@ -513,6 +524,7 @@ private:
 	bool m_supportsFramebufferFetch;
 	bool m_hasUnifiedMemory;
 	bool m_supportsMetal3;
+    bool m_supportsCubeMapArrays = false;
 	bool m_supportsMeshShaders;
 	MTL::ArgumentBuffersTier m_argumentBufferTier{MTL::ArgumentBuffersTier1};
 	uint32 m_maxArgumentBufferSamplerCount{};
@@ -534,7 +546,6 @@ private:
 	MTL::DepthStencilState* m_copyColorToDepthState;
 
 	// Void vertex pipelines
-	class MetalVoidVertexPipeline* m_copyBufferToBufferPipeline;
 
 	// Synchronization resources
 	MTL::Event* m_event;
@@ -572,7 +583,18 @@ private:
 	} m_occlusionQuery;
 
 	// Active objects
+    uint64 m_commandBufferSequence{}, m_encoderSequence{};
+    std::unordered_map<MTL::CommandBuffer*, uint64> m_commandBufferIDs;
+    NS::UInteger m_renderPassWidth{}, m_renderPassHeight{};
+    bool m_queueRecoveryAttempted = false;
+    bool m_queueRecoveryPending = false;
+    void LogCommandBufferError(MTL::CommandBuffer* commandBuffer);
+    void LabelRenderEncoder(MTL::RenderCommandEncoder* encoder, MTL::RenderPassDescriptor* descriptor);
+    void RecoverCommandQueue();
+
 	MetalCommandBuffer m_currentCommandBuffer{};
+    std::chrono::steady_clock::time_point m_commandBufferOpenedAt{};
+    bool m_commandBufferHasWork = false;
 	std::vector<MTL::CommandBuffer*> m_executingCommandBuffers;
 	MetalEncoderType m_encoderType = MetalEncoderType::None;
 	MTL::CommandEncoder* m_commandEncoder = nullptr;

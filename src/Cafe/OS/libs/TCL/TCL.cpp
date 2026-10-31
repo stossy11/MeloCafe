@@ -1,5 +1,6 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/TCL/TCL.h"
+#include "Cafe/HW/Latte/Core/LatteWorkEvent.h"
 
 #include "HW/Latte/Core/LattePM4.h"
 
@@ -77,12 +78,14 @@ namespace TCL
 			return false;
 		cmdWord = tclRingBufferA[readIndex].load(std::memory_order::relaxed);
 		tclRingBufferA_readIndex.store((readIndex + 1) % TCL_RING_BUFFER_SIZE, std::memory_order::release);
+		tclRingBufferA_readIndex.notify_one();
 		return true;
 	}
 
 	void TCLWaitForRBSpace(uint32be numU32s)
 	{
 		uint32 writeIndex = tclRingBufferA_writeIndex.load(std::memory_order::relaxed);
+		uint32 spinCount = 0;
 		while (true)
 		{
 			uint32 readIndex = tclRingBufferA_readIndex.load(std::memory_order::acquire);
@@ -91,7 +94,13 @@ namespace TCL
 				distance = TCL_RING_BUFFER_SIZE;
 			if (distance >= numU32s + 1) // assume distance minus one, because we are never allowed to completely wrap around
 				break;
-			_mm_pause();
+			if (spinCount++ < 80)
+				_mm_pause();
+			else
+			{
+				tclRingBufferA_readIndex.wait(readIndex, std::memory_order::acquire);
+				spinCount = 0;
+			}
 		}
 	}
 
@@ -153,6 +162,8 @@ namespace TCL
 		{
 			cemu_assert_unimplemented();
 		}
+		// notify once after publishing both the commands and their retire marker.
+		Latte_GetWorkEvent().Notify();
 		return 0;
 	}
 

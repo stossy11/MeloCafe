@@ -149,10 +149,20 @@ MTL::Texture* LatteTextureViewMtl::CreateSwizzledView(uint32 gpuSamplerSwizzle)
         textureType = MTL::TextureType3D;
         break;
     case Latte::E_DIM::DIM_CUBEMAP:
-        cemu_assert_debug(this->numSlice % 6 == 0 && "cubemaps must have an array length multiple of 6");
+    {
+        const bool supportsCubeArrays = static_cast<MetalRenderer*>(g_renderer.get())->SupportsCubeMapArrays();
+        if (!supportsCubeArrays && numSlice != 6)
+        {
+            LogMetalTextureDiagnostic(fmt::format( "Metal unsupported cubemap array view: firstSlice={} numSlice={}", firstSlice, numSlice));
+            throw std::runtime_error("Metal device cannot represent a view containing multiple cubes");
+        }
 
-        textureType = MTL::TextureTypeCubeArray;
+        textureType = supportsCubeArrays ? MTL::TextureTypeCubeArray : MTL::TextureTypeCube;
+
+        textureType = (firstSlice % 6 == 0 && this->numSlice % 6 == 0 && m_baseTexture->GetTexture()->width() == m_baseTexture->GetTexture()->height()) ? textureType : MTL::TextureType2DArray;
+        
         break;
+    }
     default:
         cemu_assert_unimplemented();
         textureType = MTL::TextureType2D;
@@ -172,7 +182,7 @@ MTL::Texture* LatteTextureViewMtl::CreateSwizzledView(uint32 gpuSamplerSwizzle)
     else
     {
         baseLayer = firstSlice;
-        if (textureType == MTL::TextureTypeCubeArray || textureType == MTL::TextureType2DArray)
+        if (textureType == MTL::TextureTypeCubeArray || textureType == MTL::TextureTypeCube || textureType == MTL::TextureType2DArray)
             layerCount = this->numSlice;
     }
 
@@ -187,7 +197,20 @@ MTL::Texture* LatteTextureViewMtl::CreateSwizzledView(uint32 gpuSamplerSwizzle)
     levelCount = std::max(levelCount, (uint32)1);
 
     auto pixelFormat = GetMtlPixelFormat(format, m_baseTexture->isDepth);
+    auto logView = [&]() {
+        LogMetalTextureDiagnostic(fmt::format( "Metal texture view: baseType={} type={} pixelFormat={} mip={}/{} slice={}/{} swizzle={},{},{},{}",
+                    static_cast<uint32>(m_baseTexture->GetTexture()->textureType()), static_cast<uint32>(textureType),
+                    static_cast<uint32>(pixelFormat), baseLevel, levelCount, baseLayer, layerCount,
+                    compSelR, compSelG, compSelB, compSelA));
+    };
+    if (!static_cast<MetalRenderer*>(g_renderer.get())->SupportsCubeMapArrays())
+        logView();
     MTL::Texture* texture = m_baseTexture->GetTexture()->newTextureView(pixelFormat, textureType, NS::Range::Make(baseLevel, levelCount), NS::Range::Make(baseLayer, layerCount), swizzle);
 
+    if (!texture)
+    {
+        logView();
+        throw std::runtime_error("Metal texture view allocation failed; see log");
+    }
     return texture;
 }

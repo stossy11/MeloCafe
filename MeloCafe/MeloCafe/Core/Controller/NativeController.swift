@@ -170,8 +170,17 @@ final class NativeController {
         bit(pad.buttonY.isPressed, 3)
         bit(pad.leftShoulder.isPressed, 4)
         bit(pad.rightShoulder.isPressed, 5)
-        bit(pad.leftTrigger.isPressed, 6)
-        bit(pad.rightTrigger.isPressed, 7)
+        //bit(pad.leftTrigger.isPressed, 6)
+        //bit(pad.rightTrigger.isPressed, 7)
+        let leftTriggerPressed = pad.leftTrigger.value > 0.1
+        bit(leftTriggerPressed, 6)
+        
+       // print(pad.leftTrigger.value)
+        
+        let rightTriggerPressed = pad.rightTrigger.value > 0.1
+        bit(rightTriggerPressed, 7)
+        
+        
         bit(pad.buttonOptions?.isPressed ?? false, 8)
         bit(pad.buttonMenu.isPressed, 9)
         bit(pad.leftThumbstickButton?.isPressed  ?? false, 10)

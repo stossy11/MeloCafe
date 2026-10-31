@@ -17,41 +17,60 @@ struct GameInfoSwift: Codable, Identifiable {
 }
 
 class GamesManager: ObservableObject {
-
     @Published var games: [GameInfoSwift] = []
     @Published var startedEmulation: Bool = false
 
     private let fileManager = FileManager.default
     public static let shared = GamesManager()
+    
+    var gettingIcon: Task<Void, Never>?
+    
+    var finished: Bool = false
 
-    private init() {
-
-    }
+    private init() {}
 
     func loadGames()  {
+        guard !finished else {
+            return
+        }
+        
+        finished = true
+        
         if let enumerator = fileManager.enumerator(at: .romsURL, includingPropertiesForKeys: nil) {
             for case let fileURL as URL in enumerator {
                 _ = CemuManager.load(path: fileURL.path)
             }
         }
-
+        
         var count: Int32 = 0
-
+        
         if let gamesPtr = CemuGetAllGames(false, false, &count) {
             let gamesArray = UnsafeBufferPointer(start: gamesPtr, count: Int(count))
-
-            for game in gamesArray {
-                var gameInfo = GameInfoSwift(
-                    id: game.titleId,
-                    title: String(cString: game.name),
-                    path: String(cString: game.path),
-                    icon: Data()
-                )
-                gameInfo.icon = CemuManager.loadGameIcon(game.titleId) ?? Data()
-                self.games.append(gameInfo)
+            
+            gettingIcon?.cancel()
+            
+            gettingIcon = Task {
+                var games: [GameInfoSwift] = []
+                for game in gamesArray {
+                    var gameInfo = GameInfoSwift(
+                        id: game.titleId,
+                        title: String(cString: game.name),
+                        path: String(cString: game.path),
+                        icon: Data()
+                    )
+                    gameInfo.icon = CemuManager.loadGameIcon(game.titleId) ?? Data()
+                    games.append(gameInfo)
+                }
+                
+                CemuFreeGameList(gamesPtr, count)
+                
+                let games2 = games
+                await MainActor.run {
+                    self.games = games2
+                    self.finished = false
+                }
             }
-
-            CemuFreeGameList(gamesPtr, count)
+            
         } else {
             print("No games found.")
         }

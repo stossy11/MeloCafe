@@ -52,11 +52,7 @@ void nnNfp_update();
 
 namespace coreinit
 {
-#if defined(__arm64__) && !BOOST_OS_IOS
-	void __OSFiberThreadEntry(uint32, uint32);
-#else
 	void __OSFiberThreadEntry(void* thread);
-#endif
 	void __OSAddReadyThreadToRunQueue(OSThread_t* thread);
 	void __OSRemoveThreadFromRunQueues(OSThread_t* thread);
 };
@@ -80,7 +76,7 @@ namespace coreinit
 
 	struct OSHostThread
 	{
-		OSHostThread(OSThread_t* thread) : m_thread(thread), m_fiber((void(*)(void*))__OSFiberThreadEntry, this, this)
+		OSHostThread(OSThread_t* thread) : m_thread(thread), m_fiber(__OSFiberThreadEntry, this, this)
 		{
 		}
 
@@ -1338,14 +1334,8 @@ namespace coreinit
 		__OSThreadStartTimeslice(hostThread->m_thread, &hostThread->ppcInstance);
 	}
 
-#if defined(__arm64__) && !BOOST_OS_IOS
-	void __OSFiberThreadEntry(uint32 _high, uint32 _low)
-	{
-		uint64 _thread = (uint64) _high << 32 | _low;
-#else
 	void __OSFiberThreadEntry(void* _thread)
 	{
-#endif
 		OSHostThread* hostThread = (OSHostThread*)_thread;
 
 		enableFlushDenormalsToZero();

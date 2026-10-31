@@ -11,6 +11,7 @@
 #include "input/InputManager.h"
 #include "Cafe/Filesystem/fsc.h"
 #include "Cafe/Filesystem/FST/FST.h"
+#include "Cafe/HW/MMU/MMU.h"
 
 #include "Cafe/CafeSystem.h"
 #include "Cafe/TitleList/TitleList.h"
@@ -463,6 +464,14 @@ unsigned long long CemuLoadFile(const char* launchPath, bool load)
     
     return 0;
 }
+
+
+bool offer_donated_memory(void* base, uint64_t size)
+{
+    offer_donated_mem((uint8*)base, size);
+}
+
+bool withdraw_donated_memory(void) {}
 
 struct GameIconResult {
     uint8_t* data;

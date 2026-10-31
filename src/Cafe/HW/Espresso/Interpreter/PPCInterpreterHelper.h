@@ -88,6 +88,17 @@ static float dequantize(uint32 data, sint32 type, uint8 scale)
 	return f;
 }
 
+static sint32 quantizeToInt(float data, sint32 low, sint32 high)
+{
+	if (data != data)            // NaN converts to zero, as fcvtzs does
+		return 0;
+	if (data <= (float)low)
+		return low;
+	if (data >= (float)high)
+		return high;
+	return (sint32)data;
+}
+
 static uint32 quantize(float data, sint32 type, uint8 scale)
 {
 	uint32 val;
@@ -95,28 +106,16 @@ static uint32 quantize(float data, sint32 type, uint8 scale)
 	switch (type)
 	{
 	case 4: // u8
-		data *= ST_SCALE[scale];
-		if (data < 0) data = 0;
-		if (data > 255) data = 255;
-		val = (uint8)(uint32)data; 
+		val = (uint8)quantizeToInt(data * ST_SCALE[scale], 0, 255);
 		break;
 	case 5: // u16
-		data *= ST_SCALE[scale];
-		if (data < 0) data = 0;
-		if (data > 65535) data = 65535;
-		val = (uint16)(uint32)data; 
+		val = (uint16)quantizeToInt(data * ST_SCALE[scale], 0, 65535);
 		break;
 	case 6: // s8
-		data *= ST_SCALE[scale];
-		if (data < -128) data = -128;
-		if (data > 127) data = 127;
-		val = (sint8)(uint8)(sint32)(uint32)data;
+		val = (uint8)(sint8)quantizeToInt(data * ST_SCALE[scale], -128, 127);
 		break;
 	case 7: // s16
-		data *= ST_SCALE[scale];
-		if (data < -32768) data = -32768;
-		if (data > 32767) data = 32767;
-		val = (sint16)(uint16)(sint32)(uint32)data;
+		val = (uint16)(sint16)quantizeToInt(data * ST_SCALE[scale], -32768, 32767);
 		break;
 	case 0: // float
 	default: 

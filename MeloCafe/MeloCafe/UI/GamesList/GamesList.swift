@@ -35,9 +35,18 @@ struct GamesListView: View {
     var body: some View {
         NavigationStack {
             Group {
-                switch cardType {
-                case .list: list
-                default: grid
+                if !gamesList.games.isEmpty {
+                    switch cardType {
+                    case .list: list
+                    default: grid
+                    }
+                } else {
+                    ScrollView {
+                        VStack(alignment: .center) {
+                            emptyStateView
+                                .padding(.top)
+                        }
+                    }
                 }
             }
             .sheet(item: $activeSheet) { sheet in
@@ -114,6 +123,39 @@ struct GamesListView: View {
             .padding(.top)
         }
         .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var emptyStateView: some View {
+        if #available(iOS 17, *) {
+            ContentUnavailableView(
+                "No Games Found",
+                systemImage: "square.and.arrow.down",
+                description: Text("Tap the + button to add legally dumped ROMs!")
+            )
+        } else {
+            VStack(spacing: 20) {
+                Spacer()
+                
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 64))
+                    .foregroundColor(.secondary)
+                
+                Text("No Games Found")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text("Tap the + button to add legally dumped ROMs!")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .listRowInsets(EdgeInsets())
+        }
     }
 }
 

@@ -1,4 +1,6 @@
 #include "Cafe/HW/Latte/Core/Latte.h"
+#include "Cafe/HW/Latte/Core/LatteTiming.h"
+#include "Cafe/HW/Latte/Core/LatteWorkEvent.h"
 #include "Cafe/OS/libs/gx2/GX2_Event.h"
 #ifdef ENABLE_VULKAN
 #include "Cafe/HW/Latte/Renderer/Vulkan/VsyncDriver.h"
@@ -150,6 +152,19 @@ void LatteTiming_NotifyHostVSync()
 		s_lastHostVsync += vsyncPeriod;
 
 	LatteTiming_signalVsync();
+	Latte_GetWorkEvent().Notify();
+}
+
+std::chrono::steady_clock::time_point LatteTiming_GetNextVsyncDeadline()
+{
+	const auto now = std::chrono::steady_clock::now();
+	const uint64 currentTimer = HighResolutionTimer::now().getTick();
+	if (currentTimer >= LatteGPUState.timer_nextVSync)
+		return now;
+	const auto remaining = std::chrono::duration<double>(
+		static_cast<double>(LatteGPUState.timer_nextVSync - currentTimer) /
+		static_cast<double>(HighResolutionTimer::getFrequency()));
+	return now + std::chrono::ceil<std::chrono::steady_clock::duration>(remaining);
 }
 
 // handle timed vsync event

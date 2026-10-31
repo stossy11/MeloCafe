@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Metal/Metal.hpp>
+#include <array>
+#include <map>
 
 #include "HW/Latte/Core/LatteConst.h"
 #include "HW/Latte/ISA/LatteReg.h"
@@ -16,7 +18,6 @@ public:
 private:
     class MetalRenderer* m_mtlr;
 
-    std::map<uint64, MTL::SamplerState*> m_samplerCache;
-
-    uint64 CalculateSamplerHash(const LatteContextRegister& lcr, LatteConst::ShaderType shaderType, uint32 stageSamplerIndex, const _LatteRegisterSetSampler* samplerWords);
+    using SamplerKey = std::array<uint32, 4>;
+    std::map<SamplerKey, MTL::SamplerState*> m_samplerCache;
 };

@@ -61,7 +61,7 @@ class ContentHostingController: UIHostingController<AnyView> {
         super.viewDidLoad()
         installJITTrapHandler()
         configureJITEnvironment()
-        if !checkAppEntitlement("get-task-allow") {
+        if !checkAppEntitlement("get-task-allow") && !CPUMode(CemuConfigWrapper.shared().cpuMode).isInterpreter {
             CemuConfigWrapper.shared().cpuMode = .multicoreInterpreter
         }
         setupEmulation()
@@ -117,7 +117,7 @@ class ContentHostingController: UIHostingController<AnyView> {
         setupMetalViews()
         setupControllers()
         
-        if CPUMode(cemuConfig.cpuMode) != .interpreter {
+        if !CPUMode(cemuConfig.cpuMode).isInterpreter {
             CemuInitJIT()
         }
     }

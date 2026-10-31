@@ -22,6 +22,10 @@ class CemuManager {
         let documents = URL.documentsDirectory
 
         let executable = Bundle.main.executablePath
+        
+        RamDonor.prepare(bytes: 4 * 1024 * 1024 * 1024)
+        
+        //redirectStdIOToFile()
 
         documents.path.withCString { dataPtr in
             executable!.withCString { execPtr in
@@ -29,8 +33,33 @@ class CemuManager {
             }
         }
     }
+    
+    private static func redirectStdIOToFile() {
+        let fileManager = FileManager.default
+        
+        let logsDir = URL.documentsDirectory
+        
+        if !fileManager.fileExists(atPath: logsDir.path) {
+            try? fileManager.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        }
+        
+        // cleanupOldLogs(in: logsDir, keep: 5)
+        
+        let fileName = "MeloCafe-stdout.log"
+        let logURL = logsDir.appendingPathComponent(fileName)
+        
+        fileManager.createFile(atPath: logURL.path, contents: nil)
+        
+        let fd = open(logURL.path, O_WRONLY | O_APPEND, 0o644)
+        guard fd >= 0 else { return }
+        
+        dup2(fd, STDOUT_FILENO)
+        dup2(fd, STDERR_FILENO)
+        
+        close(fd)
+    }
 
-    static func loadGameIcon(_ titleId: UInt64) -> Data? {
+    nonisolated static func loadGameIcon(_ titleId: UInt64) -> Data? {
         var iconResult = CemuGetGameIcon(titleId)
 
         guard let iconData = iconResult.data, iconResult.size > 0 else {

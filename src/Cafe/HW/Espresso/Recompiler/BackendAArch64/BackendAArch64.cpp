@@ -199,7 +199,14 @@ struct NegativeRegValueJumpInfo
 	WReg regValue;
 };
 
+struct ConditionalFlagsJumpInfo
+{
+	IMLSegment* target;
+	Cond condition;
+};
+
 using JumpInfo = std::variant<
+	ConditionalFlagsJumpInfo,
 	UnconditionalJumpInfo,
 	ConditionalRegJumpInfo,
 	NegativeRegValueJumpInfo>;
@@ -236,6 +243,7 @@ struct AArch64GenContext_t : CodeGenerator
 	void jump(IMLSegment* imlSegment);
 	void conditionalJumpCycleCheck(IMLSegment* imlSegment);
 
+	std::vector<PPCRecFunction_t::DirectLink> directLinks;
 	static constexpr size_t MAX_JUMP_INSTR_COUNT = 2;
 	std::list<std::pair<size_t, JumpInfo>> jumps;
 	void prepareJump(JumpInfo&& jumpInfo)
@@ -279,6 +287,22 @@ struct AArch64GenContext_t : CodeGenerator
 			}
 		}
 		setSize(finalSize);
+		return true;
+	}
+
+	bool handleJump(sint64 addressOffset, const ConditionalFlagsJumpInfo& jump)
+	{
+		if (addressOffset >= -0x100000 && addressOffset < 0x100000)
+		{
+			b(jump.condition, addressOffset);
+			return true;
+		}
+		const auto inverse = static_cast<Cond>(static_cast<unsigned>(jump.condition) ^ 1);
+		b(inverse, 8);
+		addressOffset -= 4;
+		if (addressOffset < -0x8000000 || addressOffset >= 0x8000000)
+			return false;
+		b(addressOffset);
 		return true;
 	}
 
@@ -964,6 +988,11 @@ void AArch64GenContext_t::conditionalJumpCycleCheck(IMLSegment* imlSegment)
 
 void* PPCRecompiler_virtualHLE(PPCInterpreter_t* ppcInterpreter, uint32 hleFuncId)
 {
+    struct ExecutionPause
+    {
+        ExecutionPause() { PPCRecompiler_suspendSingleMapExecution(); }
+        ~ExecutionPause() { PPCRecompiler_resumeSingleMapExecution(); }
+    } executionPause;
 	void* prevRSPTemp = ppcInterpreter->rspTemp;
 	if (hleFuncId == 0xFFD0)
 	{
@@ -1004,9 +1033,11 @@ bool AArch64GenContext_t::macro(IMLInstruction* imlInstruction)
 
 		uint32 newIP = imlInstruction->op_macro.param2;
 		uint64 lookupOffset = (uint64)offsetof(PPCRecompilerInstanceData_t, ppcRecompilerDirectJumpTable) + (uint64)newIP * 2ULL;
+		mov(LR.WReg, newIP);
+		directLinks.push_back({newIP, getSize()});
+		nop();
 		mov(TEMP_GPR1.XReg, lookupOffset);
 		ldr(TEMP_GPR1.XReg, AdrReg(PPC_REC_INSTANCE_REG, TEMP_GPR1.XReg));
-		mov(LR.WReg, newIP);
 		br(TEMP_GPR1.XReg);
 		return true;
 	}
@@ -1014,9 +1045,11 @@ bool AArch64GenContext_t::macro(IMLInstruction* imlInstruction)
 	{
 		uint32 newIP = imlInstruction->op_macro.param2;
 		uint64 lookupOffset = (uint64)offsetof(PPCRecompilerInstanceData_t, ppcRecompilerDirectJumpTable) + (uint64)newIP * 2ULL;
+		mov(LR.WReg, newIP);
+		directLinks.push_back({newIP, getSize()});
+		nop();
 		mov(TEMP_GPR1.XReg, lookupOffset);
 		ldr(TEMP_GPR1.XReg, AdrReg(PPC_REC_INSTANCE_REG, TEMP_GPR1.XReg));
-		mov(LR.WReg, newIP);
 		br(TEMP_GPR1.XReg);
 		return true;
 	}
@@ -1550,6 +1583,36 @@ bool PPCRecompiler_generateAArch64Code(struct PPCRecFunction_t* PPCRecFunction, 
         for (size_t i = 0; i < segIt->imlList.size(); i++)
         {
             IMLInstruction* imlInstruction = segIt->imlList.data() + i;
+            
+            if ((imlInstruction->type == PPCREC_IML_TYPE_COMPARE || imlInstruction->type == PPCREC_IML_TYPE_COMPARE_S32) &&
+                i + 1 < segIt->imlList.size())
+            {
+                auto& branch = segIt->imlList[i + 1];
+                const bool immediate = imlInstruction->type == PPCREC_IML_TYPE_COMPARE_S32;
+                const auto result = immediate ? imlInstruction->op_compare_s32.regR : imlInstruction->op_compare.regR;
+                if (branch.type == PPCREC_IML_TYPE_CONDITIONAL_JUMP &&
+                    result == branch.op_conditional_jump.registerBool) {
+                    const auto regA = gpReg<WReg>(immediate ? imlInstruction->op_compare_s32.regA : imlInstruction->op_compare.regA);
+                    auto condition = ImlCondToArm64Cond(immediate ? imlInstruction->op_compare_s32.cond : imlInstruction->op_compare.cond);
+                    
+                    if (immediate)
+                        aarch64GenContext.cmp_imm(regA, imlInstruction->op_compare_s32.immS32, TEMP_GPR1.WReg);
+                    else
+                        aarch64GenContext.cmp(regA, gpReg<WReg>(imlInstruction->op_compare.regB));
+                    
+                    if (!imlInstruction->compareResultOnlyUsedByBranch)
+                        aarch64GenContext.cset(gpReg<WReg>(result), condition);
+                    
+                    if (!branch.op_conditional_jump.mustBeTrue)
+                        condition = static_cast<Cond>(static_cast<unsigned>(condition) ^ 1);
+                    
+                    aarch64GenContext.prepareJump(ConditionalFlagsJumpInfo{segIt->nextSegmentBranchTaken, condition});
+                    
+                    ++i;
+                    continue;
+                }
+            }
+
             if (imlInstruction->type == PPCREC_IML_TYPE_R_NAME)
                 aarch64GenContext.r_name(imlInstruction);
             else if (imlInstruction->type == PPCREC_IML_TYPE_NAME_R)
@@ -1641,6 +1704,7 @@ bool PPCRecompiler_generateAArch64Code(struct PPCRecFunction_t* PPCRecFunction, 
     const bool dualMap = PPCRecompiler_isDualMapJITEnabled();
     PPCRecFunction->x86CodeWritable = dualMap ? region.rwAlias : nullptr;
     PPCRecFunction->dualMapRegion = dualMap ? region : DualMapRegion{};
+    PPCRecFunction->directLinks = std::move(aarch64GenContext.directLinks);
     allocator.detach(writable);
     return true;
 }

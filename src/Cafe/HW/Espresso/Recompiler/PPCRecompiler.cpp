@@ -26,13 +26,17 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <sys/sysctl.h>
+#include <mach/vm_prot.h>
 #endif
 #endif
 
 #include "IML/IML.h"
 
+#include <cerrno>
 #include <map>
 #include <mutex>
+#include <shared_mutex>
+#include <cstdlib>
 #include <limits>
 #include <string>
 #include <vector>
@@ -55,12 +59,33 @@
 static bool s_dualMapJITEnabled = false;
 static PPCRecompilerThreadPool s_threadPool;
 
+#if defined(__aarch64__)
+static std::shared_mutex s_singleMapExecutionMutex;
+
+void PPCRecompiler_suspendSingleMapExecution()
+{
+    if (!s_dualMapJITEnabled)
+        s_singleMapExecutionMutex.unlock_shared();
+}
+
+void PPCRecompiler_resumeSingleMapExecution()
+{
+    if (!s_dualMapJITEnabled)
+        s_singleMapExecutionMutex.lock_shared();
+}
+#endif
+
 bool PPCRecompiler_isDualMapJITEnabled()
 {
     return s_dualMapJITEnabled;
 }
 
-#if defined(__APPLE__)
+// Apple has been ragebaiting me over AppStore submission lol
+#if DIST_APPSTORE
+bool checkDebugged() {
+    return false;
+}
+#elif defined(__APPLE__)
 extern "C" int csops(pid_t pid, int ops, void* useraddr, size_t usersize);
 
 constexpr uint32_t CS_DEBUGGED = 0x10000000;
@@ -178,7 +203,9 @@ DualMapRegion PPCRecompiler_allocateDualMap(size_t size)
     void* rxPtr = nullptr;
 
     if (PPCRecompiler_readTXMEnvVar())
+    {
         rxPtr = BreakGetJITMapping(nullptr, size);
+    }
 
     if (!rxPtr)
         rxPtr = mmap(nullptr, size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
@@ -277,6 +304,54 @@ struct DualMapArena
     DualMapRegion region;
     std::mutex mutex;
     std::map<size_t, size_t> freeRanges;
+    std::vector<DualMapRegion> retiredRegions;
+    size_t activeExecutions = 0;
+    bool reclaimFailureLogged = false;
+    
+    void reclaimPages(size_t start, size_t end)
+    {
+#if defined(__APPLE__) && defined(__aarch64__)
+        const size_t pageSize = vm_page_size;
+        start = (start + pageSize - 1) & ~(pageSize - 1);
+        end &= ~(pageSize - 1);
+        if (start >= end)
+            return;
+        if (madvise((uint8*)region.rxAlias + start, end - start, MADV_FREE) != 0 &&
+            !reclaimFailureLogged)
+        {
+            const int error = errno;
+            reclaimFailureLogged = true;
+            cemuLog_log(LogType::Force, "JIT arena: page reclaim failed (errno={})", error);
+        }
+#endif
+    }
+
+    void beginExecution()
+    {
+        std::lock_guard lock(mutex);
+        ++activeExecutions;
+    }
+
+    void endExecution()
+    {
+        std::lock_guard lock(mutex);
+        cemu_assert(activeExecutions != 0);
+        if (--activeExecutions == 0)
+        {
+            for (const auto& allocation : retiredRegions)
+                releaseLocked(allocation);
+            retiredRegions.clear();
+        }
+    }
+    
+    void retire(const DualMapRegion& allocation)
+    {
+        std::lock_guard lock(mutex);
+        if (activeExecutions)
+            retiredRegions.push_back(allocation);
+        else
+            releaseLocked(allocation);
+    }
 
     bool init(size_t size)
     {
@@ -320,11 +395,22 @@ struct DualMapArena
 
     void release(const DualMapRegion& allocation)
     {
+        std::lock_guard lock(mutex);
+        releaseLocked(allocation);
+    }
+
+    void releaseLocked(const DualMapRegion& allocation)
+    {
         if (!allocation.rwAlias || !allocation.size)
             return;
         const size_t pos = (uint8*)allocation.rwAlias - (uint8*)region.rwAlias;
         cemu_assert(pos <= region.size && allocation.size <= region.size - pos);
-        std::lock_guard lock(mutex);
+        size_t reclaimStart = pos;
+        size_t reclaimEnd = pos + allocation.size;
+#if defined(__APPLE__) && defined(__aarch64__)
+        reclaimStart &= ~(size_t(vm_page_size) - 1);
+        reclaimEnd = (reclaimEnd + vm_page_size - 1) & ~(size_t(vm_page_size) - 1);
+#endif
         auto next = freeRanges.lower_bound(pos);
         cemu_assert(next == freeRanges.end() || pos + allocation.size <= next->first);
         if (next != freeRanges.begin())
@@ -339,6 +425,8 @@ struct DualMapArena
                     previous->second += next->second;
                     freeRanges.erase(next);
                 }
+                reclaimPages(std::max(reclaimStart, previous->first),
+                    std::min(reclaimEnd, previous->first + previous->second));
                 return;
             }
         }
@@ -347,20 +435,27 @@ struct DualMapArena
             auto range = freeRanges.extract(next);
             range.key() = pos;
             range.mapped() += allocation.size;
-            freeRanges.insert(std::move(range));
+            next = freeRanges.insert(std::move(range)).position;
         }
         else
         {
-            freeRanges.emplace(pos, allocation.size);
+            next = freeRanges.emplace(pos, allocation.size).first;
         }
+        reclaimPages(std::max(reclaimStart, next->first),
+            std::min(reclaimEnd, next->first + next->second));
     }
 
     void reset()
     {
         std::lock_guard lock(mutex);
+        cemu_assert(activeExecutions == 0);
+        retiredRegions.clear();
         freeRanges.clear();
         if (region.size)
+        {
             freeRanges.emplace(0, region.size);
+            reclaimPages(0, region.size);
+        }
     }
 };
 
@@ -513,28 +608,58 @@ static bool isInterfaceFunc(PPCREC_JUMP_ENTRY funcPtr)
 
 void PPCRecompiler_enter(PPCInterpreter_t* hCPU, PPCREC_JUMP_ENTRY funcPtr)
 {
-#if BOOST_OS_WINDOWS
-	uint32 prevState = _controlfp(0, 0);
-	_controlfp(_RC_NEAR, _MCW_RC);
-	PPCRecompiler_enterRecompilerCode((uint64)funcPtr, (uint64)hCPU);
-	_controlfp(prevState, _MCW_RC);
-	// debug recompiler exit - useful to find frequently executed functions which couldn't be recompiled
-	#ifdef CEMU_DEBUG_ASSERT
-	if (hCPU->remainingCycles > 0 && GetAsyncKeyState(VK_F4))
-	{
-		auto t = std::chrono::high_resolution_clock::now();
-		auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t.time_since_epoch()).count();
-		cemuLog_log(LogType::Force, "Recompiler exit: 0x{:08x} LR: 0x{:08x} Timestamp {}.{:04}", hCPU->instructionPointer, hCPU->spr.LR, dur / 1000LL, (dur % 1000LL));
-	}
-	#endif
-#else
-	PPCRecompiler_enterRecompilerCode((uint64)funcPtr, (uint64)hCPU);
+    {
+#if defined(__aarch64__)
+        std::shared_lock singleMapExecution(s_singleMapExecutionMutex, std::defer_lock);
+        if (!s_dualMapJITEnabled)
+        {
+            std::lock_guard lock(PPCRecompilerState.recompilerSpinlock);
+            singleMapExecution.lock();
+            funcPtr = ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[hCPU->instructionPointer / 4];
+            if (isInterfaceFunc(funcPtr))
+                return;
+        }
 #endif
-	// after leaving recompiler prematurely attempt to recompile the code at the new location
-	if (hCPU->remainingCycles > 0)
-	{
-		PPCRecompiler_visitAddressNoBlock(hCPU->instructionPointer);
-	}
+        struct ExecutionGuard
+        {
+            bool enabled;
+            ~ExecutionGuard()
+            {
+                if (enabled)
+                    s_jitArena.endExecution();
+            }
+        } executionGuard{s_dualMapJITEnabled};
+        if (executionGuard.enabled)
+        {
+            std::lock_guard lock(PPCRecompilerState.recompilerSpinlock);
+            s_jitArena.beginExecution();
+            funcPtr = ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[hCPU->instructionPointer / 4];
+            if (isInterfaceFunc(funcPtr))
+                return;
+        }
+#if BOOST_OS_WINDOWS
+        uint32 prevState = _controlfp(0, 0);
+        _controlfp(_RC_NEAR, _MCW_RC);
+        PPCRecompiler_enterRecompilerCode((uint64)funcPtr, (uint64)hCPU);
+        _controlfp(prevState, _MCW_RC);
+        
+        #ifdef CEMU_DEBUG_ASSERT
+        if (hCPU->remainingCycles > 0 && GetAsyncKeyState(VK_F4))
+        {
+            auto t = std::chrono::high_resolution_clock::now();
+            auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t.time_since_epoch()).count();
+            cemuLog_log(LogType::Force, "Recompiler exit: 0x{:08x} LR: 0x{:08x} Timestamp {}.{:04}", hCPU->instructionPointer, hCPU->spr.LR, dur / 1000LL, (dur % 1000LL));
+        }
+        #endif
+#else
+        PPCRecompiler_enterRecompilerCode((uint64)funcPtr, (uint64)hCPU);
+#endif
+    }
+    
+    if (hCPU->remainingCycles > 0)
+    {
+        PPCRecompiler_visitAddressNoBlock(hCPU->instructionPointer);
+    }
 }
 
 void PPCRecompiler_attemptEnterWithoutRecompile(PPCInterpreter_t* hCPU, uint32 enterAddress)
@@ -860,6 +985,126 @@ bool PPCRecompiler_ApplyIMLPasses(ppcImlGenContext_t& ppcImlGenContext)
 	return true;
 }
 
+#if defined(__aarch64__)
+namespace
+{
+struct PPCDirectLinkSource
+{
+    PPCRecFunction_t* owner;
+    size_t offset;
+};
+static std::map<uint32, std::vector<PPCDirectLinkSource>> s_directLinkSources;
+
+void PPCRecompiler_patchDirectLink(const PPCDirectLinkSource& source, PPCREC_JUMP_ENTRY target)
+{
+    constexpr uint32 nop = 0xD503201F;
+    uint32 instruction = nop;
+    auto* executable = static_cast<uint8*>(source.owner->x86Code) + source.offset;
+    if (target && target != PPCRecompiler_leaveRecompilerCode_unvisited &&
+        target != PPCRecompiler_leaveRecompilerCode_visited)
+    {
+        const sint64 displacement = static_cast<sint64>(reinterpret_cast<uintptr_t>(target)) -
+            static_cast<sint64>(reinterpret_cast<uintptr_t>(executable));
+        if ((displacement & 3) == 0 && displacement >= -0x8000000 && displacement < 0x8000000)
+            instruction = 0x14000000u | (static_cast<uint32>(displacement / 4) & 0x03FFFFFFu);
+    }
+    const bool dualMap = source.owner->x86CodeWritable != nullptr;
+    auto* writable = reinterpret_cast<uint32*>(dualMap
+        ? static_cast<uint8*>(source.owner->x86CodeWritable) + source.offset
+        : executable);
+    auto patch = stdx::atomic_ref<uint32>(*writable);
+    if (patch.load(std::memory_order_relaxed) == instruction)
+        return;
+    std::unique_lock executionLock(s_singleMapExecutionMutex, std::defer_lock);
+    void* page = nullptr;
+    size_t pageSize = 0;
+    if (!dualMap)
+    {
+        executionLock.lock();
+#if defined(_WIN32)
+        SYSTEM_INFO info;
+        GetSystemInfo(&info);
+        pageSize = info.dwPageSize;
+#else
+        pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+#endif
+        page = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(executable) & ~(pageSize - 1));
+#if defined(_WIN32)
+        DWORD previousProtection;
+        const bool success = VirtualProtect(page, pageSize, PAGE_READWRITE, &previousProtection) != 0;
+#else
+        const bool success = mprotect(page, pageSize, PROT_READ | PROT_WRITE) == 0;
+#endif
+        if (!success)
+        {
+            cemuLog_log(LogType::Force, "Recompiler: direct-link RW protection failed at {:p}", page);
+            std::abort();
+        }
+    }
+    
+    patch.store(instruction, std::memory_order_release);
+    PPCRecompiler_flushInstructionCache(writable, sizeof(uint32));
+    if (!dualMap)
+    {
+#if defined(_WIN32)
+        DWORD previousProtection;
+        const bool success = VirtualProtect(page, pageSize, PAGE_EXECUTE_READ, &previousProtection) != 0;
+#else
+        const bool success = mprotect(page, pageSize, PROT_READ | PROT_EXEC) == 0;
+#endif
+        if (!success)
+        {
+            cemuLog_log(LogType::Force, "Recompiler: direct-link RX protection failed at {:p}", page);
+            std::abort();
+        }
+    }
+    PPCRecompiler_flushInstructionCache(executable, sizeof(uint32));
+}
+
+void PPCRecompiler_unlinkDirectRange(uint32 start, uint64 end)
+{
+    for (auto it = s_directLinkSources.lower_bound(start); it != s_directLinkSources.end() && it->first < end; ++it)
+        for (const auto& source : it->second)
+            PPCRecompiler_patchDirectLink(source, nullptr);
+}
+
+void PPCRecompiler_removeDirectLinkSource(PPCRecFunction_t* function)
+{
+    for (const auto& link : function->directLinks)
+    {
+        auto it = s_directLinkSources.find(link.destination);
+        if (it == s_directLinkSources.end())
+            continue;
+        auto& sources = it->second;
+        std::erase_if(sources, [function](const auto& source) { return source.owner == function; });
+        if (sources.empty())
+            s_directLinkSources.erase(it);
+    }
+}
+
+void PPCRecompiler_publishDirectLinks(PPCRecFunction_t* function, const std::vector<std::pair<MPTR, uint32>>& entries)
+{
+    if (function->x86Code)
+    {
+        for (const auto& link : function->directLinks)
+        {
+            PPCDirectLinkSource source{function, link.offset};
+            s_directLinkSources[link.destination].push_back(source);
+            PPCRecompiler_patchDirectLink(source, ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[link.destination / 4]);
+        }
+    }
+    
+    for (const auto& entry : entries)
+    {
+        auto it = s_directLinkSources.find(entry.first);
+        if (it != s_directLinkSources.end())
+            for (const auto& source : it->second)
+                PPCRecompiler_patchDirectLink(source, ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[entry.first / 4]);
+    }
+}
+}
+#endif
+
 bool PPCRecompiler_makeRecompiledFunctionActive(uint32 initialEntryPoint, PPCFunctionBoundaryTracker::PPCRange_t& range, PPCRecFunction_t* ppcRecFunc, std::vector<std::pair<MPTR, uint32>>& entryPoints)
 {
     // update jump table
@@ -906,6 +1151,10 @@ bool PPCRecompiler_makeRecompiledFunctionActive(uint32 initialEntryPoint, PPCFun
     }
     
     
+#if defined(__aarch64__)
+    PPCRecompiler_publishDirectLinks(ppcRecFunc, entryPoints);
+#endif
+
     // due to inlining, some entrypoints can get optimized away
     // therefore we reset all addresses that are still marked as visited (but not recompiled)
     // we dont remove the points from the queue but any address thats not marked as visited won't get recompiled
@@ -1091,6 +1340,9 @@ void PPCRecompiler_invalidateTableRange(uint32 offset, uint32 size)
 {
 	if (ppcRecompilerInstanceData == nullptr)
 		return;
+#if defined(__aarch64__)
+    PPCRecompiler_unlinkDirectRange(offset, uint64(offset) + size);
+#endif
 	for (uint32 i = 0; i < size / 4; i++)
 	{
 		ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[offset / 4 + i] = PPCRecompiler_leaveRecompilerCode_unvisited;
@@ -1100,6 +1352,9 @@ void PPCRecompiler_invalidateTableRange(uint32 offset, uint32 size)
 void PPCRecompiler_deleteFunction(PPCRecFunction_t* func)
 {
     cemu_assert_debug(PPCRecompilerState.recompilerSpinlock.is_locked());
+#if defined(__aarch64__)
+    PPCRecompiler_removeDirectLinkSource(func);
+#endif
     for (auto& r : func->list_ranges)
     {
         PPCRecompiler_invalidateTableRange(r.ppcAddress, r.ppcSize);
@@ -1110,7 +1365,7 @@ void PPCRecompiler_deleteFunction(PPCRecFunction_t* func)
 
     if (func->dualMapRegion.rwAlias)
     {
-        PPCRecompiler_releaseJitArena(func->dualMapRegion);
+        s_jitArena.retire(func->dualMapRegion);
         func->dualMapRegion   = DualMapRegion{};
         func->x86Code         = nullptr;
         func->x86CodeWritable = nullptr;
@@ -1133,6 +1388,9 @@ void PPCRecompiler_invalidateRangeInternal(uint32 startAddr, uint32 endAddr)
 	uint32 rEnd;
 	PPCRecFunction_t* rFunc;
 
+#if defined(__aarch64__)
+    PPCRecompiler_unlinkDirectRange(startAddr & ~3u, endAddr & ~3u);
+#endif
 	// mark range as unvisited
 	for (uint64 currentAddr = (uint64)startAddr&~3; currentAddr < (uint64)(endAddr&~3); currentAddr += 4)
 		ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[currentAddr / 4] = PPCRecompiler_leaveRecompilerCode_unvisited;

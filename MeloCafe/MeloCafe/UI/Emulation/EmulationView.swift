@@ -62,13 +62,10 @@ struct EmulationView: View {
                         } else {
                             HStack(spacing: 0) { screens }
                         }
-
-                        if controllerManager.hasVirtual() {
-                            ControllerView(
-                                controller: controllerHandler,
-                                isEditing: false
-                            )
-                        }
+                        
+                        Spacer()
+                            .allowsHitTesting(false)
+                            .frame(minWidth: 0, minHeight: 0)
                     }
                 }
             }
@@ -76,6 +73,14 @@ struct EmulationView: View {
                 .all,
                 edges: verticalSizeClass == .regular ? .horizontal : .all
             )
+            
+            if controllerManager.hasVirtual() {
+                ControllerView(
+                    controller: controllerHandler,
+                    isEditing: false
+                )
+            }
+
         }
         .overlay(alignment: .topLeading) {
             if showSwapButton && screenLayout == .singleScreen && !air.connected {

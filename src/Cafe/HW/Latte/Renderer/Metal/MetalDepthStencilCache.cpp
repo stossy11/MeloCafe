@@ -101,11 +101,11 @@ uint64 MetalDepthStencilCache::CalculateDepthStencilHash(const LatteContextRegis
 	bool stencilTestEnable = depthControl & 1;
 	if (stencilTestEnable)
 	{
-		stateHash += ctxRegister[mmDB_STENCILREFMASK];
+        stateHash += ctxRegister[mmDB_STENCILREFMASK] & 0x00FFFF00u;
 		stateHash = std::rotl<uint64>(stateHash, 17);
 		if(depthControl & (1<<7)) // back stencil enable
 		{
-			stateHash += ctxRegister[mmDB_STENCILREFMASK_BF];
+            stateHash += ctxRegister[mmDB_STENCILREFMASK_BF] & 0x00FFFF00u;
 			stateHash = std::rotl<uint64>(stateHash, 13);
 		}
 	}

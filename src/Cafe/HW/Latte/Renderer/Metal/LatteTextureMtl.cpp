@@ -42,9 +42,16 @@ LatteTextureMtl::LatteTextureMtl(class MetalRenderer* mtlRenderer, Latte::E_DIM 
         textureType = MTL::TextureType3D;
         break;
     case Latte::E_DIM::DIM_CUBEMAP:
-        cemu_assert_debug(effectiveBaseDepth % 6 == 0 && "cubemaps must have an array length multiple of 6");
+        if (!mtlRenderer->SupportsCubeMapArrays() && effectiveBaseDepth != 6)
+        {
+            LogMetalTextureDiagnostic(fmt::format( "Metal unsupported cubemap array: GX2 format=0x{:x} size={}x{} faces={} address=0x{:x}",
+                        static_cast<uint32>(format), effectiveBaseWidth, effectiveBaseHeight, effectiveBaseDepth, physAddress));
+            throw std::runtime_error("Metal device cannot represent a cubemap array with multiple cubes");
+        }
+		textureType = mtlRenderer->SupportsCubeMapArrays() ? MTL::TextureTypeCubeArray : MTL::TextureTypeCube;
 
-        textureType = MTL::TextureTypeCubeArray;
+		textureType = (effectiveBaseDepth % 6 == 0 && effectiveBaseWidth == effectiveBaseHeight) ? textureType : MTL::TextureType2DArray;
+        
         break;
     default:
         cemu_assert_unimplemented();
@@ -81,8 +88,13 @@ LatteTextureMtl::LatteTextureMtl(class MetalRenderer* mtlRenderer, Latte::E_DIM 
 	if (FormatIsRenderable(format))
 		usage |= MTL::TextureUsageRenderTarget;
 	desc->setUsage(usage);
-
-	m_texture = mtlRenderer->GetDevice()->newTexture(desc);
+    
+    m_texture = mtlRenderer->GetDevice()->newTexture(desc);
+    if (!m_texture)
+    {
+        LogMetalTextureDescriptor("allocation failed", desc);
+        throw std::runtime_error("Metal texture allocation failed; see texture descriptor in log");
+    }
 }
 
 LatteTextureMtl::~LatteTextureMtl()

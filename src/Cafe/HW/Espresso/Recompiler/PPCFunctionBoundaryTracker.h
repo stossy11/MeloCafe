@@ -84,6 +84,8 @@ private:
 	// returns false if the IP cannot increment past the current instruction
 	bool processInstruction(PPCRange_t* range, MPTR address)
 	{
+		if (!memory_isAddressRangeAccessible(address, 4))
+			return false;
 		// parse instructions
 		uint32 opcode = memory_readU32(address);
 		switch (Espresso::GetPrimaryOpcode(opcode))

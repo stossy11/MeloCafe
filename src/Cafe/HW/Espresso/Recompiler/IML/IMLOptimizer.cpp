@@ -703,6 +703,23 @@ void IMLOptimizer_StandardOptimizationPassForSegment(IMLOptimizerRegIOAnalysis& 
 {
 	IMLOptimizer_RemoveDeadCodeFromSegment(regIoAnalysis, seg);
 
+#ifdef __aarch64__
+	for (size_t i = 0; i + 1 < seg.imlList.size(); ++i)
+	{
+		auto& cmp = seg.imlList[i];
+		auto& branch = seg.imlList[i + 1];
+		if ((cmp.type != PPCREC_IML_TYPE_COMPARE && cmp.type != PPCREC_IML_TYPE_COMPARE_S32) ||
+			branch.type != PPCREC_IML_TYPE_CONDITIONAL_JUMP)
+			continue;
+		const auto result = cmp.type == PPCREC_IML_TYPE_COMPARE ? cmp.op_compare.regR : cmp.op_compare_s32.regR;
+		cmp.compareResultOnlyUsedByBranch =
+			result.GetRegID() == branch.op_conditional_jump.registerBool.GetRegID() &&
+			IMLUtil_CountRegisterReadsInRange(seg, i + 1, seg.imlList.size() - 1, result.GetRegID()) == 1 &&
+			!regIoAnalysis.IsRegisterNeededAtEndOfSegment(seg, result.GetRegID());
+	}
+#endif
+
+
 #ifdef ARCH_X86_64
 	// x86 specific optimizations
 	IMLOptimizerX86_SubstituteCJumpForEflagsJump(regIoAnalysis, seg); // this pass should be applied late since it creates invisible eflags dependencies (which would break further register dependency analysis)

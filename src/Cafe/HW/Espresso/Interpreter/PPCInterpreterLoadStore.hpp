@@ -1002,6 +1002,9 @@ static void PPCInterpreter_PSQ_STX(PPCInterpreter_t* hCPU, unsigned int opcode)
 	rA = (opcode >> (31 - 15)) & 0x1F;
 	rB = (opcode >> (31 - 20)) & 0x1F;
 	uint32 EA = (rA ? hCPU->gpr[rA] : 0) + hCPU->gpr[rB];
+	// Bit 25 selects PSQ_STUX, which shares this opcode slot and writes the EA back.
+	if (((opcode >> 6) & 1) && rA)
+		hCPU->gpr[rA] = EA;
 
 	sint32 type = ST_TYPE(PSIX);
 	uint8 scale = (uint8)ST_SCALE(PSIX);
@@ -1069,6 +1072,9 @@ static void PPCInterpreter_PSQ_LX(PPCInterpreter_t* hCPU, unsigned int opcode)
 	rB = (opcode >> (32 - 21)) & 0x1F;
 
 	uint32 EA = (rA ? hCPU->gpr[rA] : 0) + hCPU->gpr[rB];
+	// Bit 25 selects PSQ_LUX, which shares this opcode slot and writes the EA back.
+	if (((opcode >> 6) & 1) && rA)
+		hCPU->gpr[rA] = EA;
 
 	sint32 type = LD_TYPE(PSIX);
 	uint8 scale = (uint8)LD_SCALE(PSIX);

@@ -8,6 +8,7 @@
 #include "Cafe/HW/Latte/Core/LatteQueryObject.h"
 #include "Cafe/HW/Latte/Renderer/RendererOuputShader.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -86,6 +87,11 @@ public:
 	// flush control
 	virtual void Flush(bool waitIdle = false) = 0; // called when explicit flush is required (e.g. by imgui)
 	virtual void NotifyLatteCommandProcessorIdle() = 0; // called when command processor has no more commands available or when stalled
+	// the command processor must service deferred submissions before sleeping past this deadline.
+	virtual std::chrono::steady_clock::time_point GetIdleSubmissionDeadline() const
+	{
+		return std::chrono::steady_clock::time_point::max();
+	}
 
 	// imgui
 	virtual bool ImguiBegin(bool mainWindow);

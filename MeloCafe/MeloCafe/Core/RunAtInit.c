@@ -15,6 +15,4 @@ __attribute__((constructor))
 static void set_available_memory(void) {
     g_available_memory =  os_proc_available_memory();
     printf("Available memory: %zu bytes\n", g_available_memory);
-
-
 }

@@ -88,8 +88,14 @@ MetalSamplerCache::~MetalSamplerCache()
 
 MTL::SamplerState* MetalSamplerCache::GetSamplerState(const LatteContextRegister& lcr, LatteConst::ShaderType shaderType, uint32 stageSamplerIndex, const _LatteRegisterSetSampler* samplerWords)
 {
-    uint64 stateHash = CalculateSamplerHash(lcr, shaderType, stageSamplerIndex, samplerWords);
-    auto& samplerState = m_samplerCache[stateHash];
+    const auto borderColor = GetBorderColor(shaderType, stageSamplerIndex, samplerWords);
+    const SamplerKey stateKey = {
+        samplerWords->WORD0.getRawValue(),
+        samplerWords->WORD1.getRawValue(),
+        samplerWords->WORD2.getRawValue(),
+        static_cast<uint32>(borderColor)
+    };
+    auto& samplerState = m_samplerCache[stateKey];
     if (samplerState)
         return samplerState;
 
@@ -163,7 +169,7 @@ MTL::SamplerState* MetalSamplerCache::GetSamplerState(const LatteContextRegister
     samplerDescriptor->setCompareFunction(GetMtlCompareFunc((Latte::E_COMPAREFUNC)samplerWords->WORD0.get_DEPTH_COMPARE_FUNCTION()));
 
     // Border color
-    auto borderColor = GetBorderColor(shaderType, stageSamplerIndex, samplerWords, true);
+    GetBorderColor(shaderType, stageSamplerIndex, samplerWords, true);
     samplerDescriptor->setBorderColor(borderColor);
 
     samplerState = m_mtlr->GetDevice()->newSamplerState(samplerDescriptor);
@@ -171,21 +177,3 @@ MTL::SamplerState* MetalSamplerCache::GetSamplerState(const LatteContextRegister
     return samplerState;
 }
 
-uint64 MetalSamplerCache::CalculateSamplerHash(const LatteContextRegister& lcr, LatteConst::ShaderType shaderType, uint32 stageSamplerIndex, const _LatteRegisterSetSampler* samplerWords)
-{
-    uint64 hash = 0;
-    hash = std::rotl<uint64>(hash, 17);
-    hash += (uint64)samplerWords->WORD0.getRawValue();
-    hash = std::rotl<uint64>(hash, 17);
-    hash += (uint64)samplerWords->WORD1.getRawValue();
-    hash = std::rotl<uint64>(hash, 17);
-    hash += (uint64)samplerWords->WORD2.getRawValue();
-
-    auto borderColor = GetBorderColor(shaderType, stageSamplerIndex, samplerWords);
-
-    hash = std::rotl<uint64>(hash, 5);
-    hash += (uint64)borderColor;
-
-    // TODO: check this
-	return hash;
-}

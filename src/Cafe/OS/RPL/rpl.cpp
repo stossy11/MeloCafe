@@ -138,13 +138,15 @@ uint32 RPLLoader_GetMaxCodeOffset()
 
 #define PPCASM_OPC_R_TEMPL_SIMM(_rD, _rA, _IMM) (((_rD)<<21)|((_rA)<<16)|((_IMM)&0xFFFF))
 
-static void RPLLoader_PublishGeneratedCode(MPTR startAddress, uint32 size)
+static void RPLLoader_PublishGeneratedCode(MPTR startAddress, uint32 size, uint32 executableSize = 0)
 {
 	if (size == 0)
 		return;
 
 	PPCRecompiler_invalidateRange(startAddress, startAddress + size);
     PPCInterpreter_invalidateBlockCacheRange(startAddress, size);
+	if (!PPCRecompiler_enabled())
+		PPCInterpreter_predecodeGeneratedRange(startAddress, executableSize ? executableSize : size);
 }
 
 // generates 32-bit jump. Modifies R11 and CTR
@@ -816,7 +818,7 @@ uint32 rpl_mapHLEImport(RPLModule* rplLoaderContext, const char* rplName, const 
 	currentAddress++;
 	// align address to 4 byte boundary
 	currentAddress = (currentAddress + 3)&~3;
-	RPLLoader_PublishGeneratedCode(codeStart, currentAddress - codeStart);
+	RPLLoader_PublishGeneratedCode(codeStart, currentAddress - codeStart, 2 * sizeof(uint32));
 	// register mapped import
 	mappedFunctionImport_t newImport;
 	newImport.hash1 = mappedImportHash1;
@@ -1908,6 +1910,8 @@ void RPLLoader_Link()
 		rplModuleList[i]->isLinked = true; // mark as linked
 		GraphicPack2::NotifyModuleLoaded(rplModuleList[i]);
 		g_debuggerDispatcher.NotifyModuleLoaded(rplModuleList[i]);
+		if (!PPCRecompiler_enabled())
+			PPCInterpreter_predecodeRange(rplModuleList[i]->regionMappingBase_text.GetMPTR(), rplModuleList[i]->regionSize_text);
 	}
 }
 

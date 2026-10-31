@@ -114,8 +114,17 @@ MetalPipelineCache::~MetalPipelineCache()
 
 PipelineObject* MetalPipelineCache::GetRenderPipelineState(const LatteFetchShader* fetchShader, const LatteDecompilerShader* vertexShader, const LatteDecompilerShader* geometryShader, const LatteDecompilerShader* pixelShader, const MetalAttachmentsInfo& lastUsedAttachmentsInfo, const MetalAttachmentsInfo& activeAttachmentsInfo, Vector2i extend, uint32 indexCount, const LatteContextRegister& lcr)
 {
+    const auto key = MetalPipelineStateKey::Capture(fetchShader, vertexShader, geometryShader, pixelShader,
+        lastUsedAttachmentsInfo, activeAttachmentsInfo, lcr);
+    const bool cacheable = key.vertexBufferCount <= key.vertexStrides.size();
+    if (cacheable && m_lastPipelineObject && key == m_lastPipelineKey)
+        return m_lastPipelineObject;
+
     uint64 hash = CalculatePipelineHash(fetchShader, vertexShader, geometryShader, pixelShader, lastUsedAttachmentsInfo, activeAttachmentsInfo, lcr);
     PipelineObject*& pipelineObj = m_pipelineCache[hash];
+    m_lastPipelineKey = key;
+    
+    m_lastPipelineObject = cacheable ? pipelineObj : nullptr;
     if (pipelineObj)
         return pipelineObj;
 
@@ -148,6 +157,7 @@ PipelineObject* MetalPipelineCache::GetRenderPipelineState(const LatteFetchShade
 	// Save to cache
     AddCurrentStateToCache(hash, lastUsedAttachmentsInfo);
 
+    m_lastPipelineObject = cacheable ? pipelineObj : nullptr;
     return pipelineObj;
 }
 
@@ -359,6 +369,7 @@ void MetalPipelineCache::EndLoading()
 
 void MetalPipelineCache::Close()
 {
+    m_lastPipelineObject = nullptr;
     if(s_cache)
     {
         delete s_cache;
