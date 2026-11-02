@@ -19,7 +19,9 @@ struct GameInfoSwift: Codable, Identifiable {
 class GamesManager: ObservableObject {
     @Published var games: [GameInfoSwift] = []
     @Published var startedEmulation: Bool = false
+    @Published private(set) var pinnedGameIDs: Set<UInt64>
 
+    private static let pinnedGamesKey = "pinnedGameIDs"
     private let fileManager = FileManager.default
     public static let shared = GamesManager()
     
@@ -27,7 +29,29 @@ class GamesManager: ObservableObject {
     
     var finished: Bool = false
 
-    private init() {}
+    private init() {
+        let savedIDs = UserDefaults.standard.stringArray(forKey: Self.pinnedGamesKey) ?? []
+        pinnedGameIDs = Set(savedIDs.compactMap { UInt64($0) })
+    }
+
+    var orderedGames: [GameInfoSwift] {
+        // Keep the library's existing order within each group.
+        games.filter { isPinned($0) } + games.filter { !isPinned($0) }
+    }
+
+    func isPinned(_ game: GameInfoSwift) -> Bool {
+        pinnedGameIDs.contains(game.id)
+    }
+
+    func togglePin(_ game: GameInfoSwift) {
+        if isPinned(game) {
+            pinnedGameIDs.remove(game.id)
+        } else {
+            pinnedGameIDs.insert(game.id)
+        }
+        // Strings preserve the full UInt64 title ID in UserDefaults.
+        UserDefaults.standard.set(pinnedGameIDs.sorted().map { String($0) }, forKey: Self.pinnedGamesKey)
+    }
 
     func loadGames()  {
         guard !finished else {
