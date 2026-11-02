@@ -11,6 +11,7 @@ LatteTextureReadbackInfoMtl::~LatteTextureReadbackInfoMtl()
 
 void LatteTextureReadbackInfoMtl::StartTransfer()
 {
+	m_mtlr->GetPerformanceMonitor().m_readbackCount++;
 	cemu_assert(m_textureView);
 
 	auto* baseTexture = (LatteTextureMtl*)m_textureView->baseTexture;
