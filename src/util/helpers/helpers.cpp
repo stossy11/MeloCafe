@@ -119,29 +119,11 @@ typedef struct tagTHREADNAME_INFO
 #endif
 
 #if BOOST_OS_IOS || BOOST_OS_MACOS
-void SetHighSpeedCores() {
-#if BOOST_OS_IOS
+void SetHighSpeedCores()
+{
+    // Darwin schedules performance-sensitive work through QoS; it does not
+    // expose Linux's pthread_setaffinity_np or fixed performance-core indices.
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-#elif BOOST_OS_MACOS
-    // no clue if this compiles, yoinked code from stack overflow -stossy11
-    pthread_t current_thread = pthread_self();
-    
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-
-    CPU_SET(0, &cpuset);
-    CPU_SET(1, &cpuset);
-    CPU_SET(2, &cpuset);
-    CPU_SET(3, &cpuset);
-    
-    int result = pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
-    
-    if (result != 0) {
-        perror("Error setting thread affinity");
-    } else {
-        printf("Thread successfully pinned to high-speed cores!\n");
-    }
-#endif
 }
 #endif
 
