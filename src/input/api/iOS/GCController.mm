@@ -127,9 +127,9 @@ MotionSample GCControllerDevice::get_motion_sample()
     
     m_motion_handler.processMotionSample(deltaTime,
         s.gyroscope.x,     s.gyroscope.y,     s.gyroscope.z,
-        s.accelerometer.x, s.accelerometer.y, s.accelerometer.z);
+        s.accelerometer.x, s.accelerometer.y, s.accelerometer.z, false);
 
-    m_last_motion_cache = m_motion_handler.getMotionSample();
+    m_last_motion_cache = m_motion_handler.getMotionSample().withReversedHorizontalAxes();
     return m_last_motion_cache;
 }
 

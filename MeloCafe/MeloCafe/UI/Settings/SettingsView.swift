@@ -446,7 +446,14 @@ struct SettingsView: View {
     }
 
     private var inputServicesSection: some View {
-        Section("Input Services") {
+        Section {
+            Picker("Motion Source", selection: $controllerManager.motionSource) {
+                ForEach(ControllerMotionSource.allCases, id: \.self) { source in
+                    Text(source.name).tag(source)
+                }
+            }
+            .pickerStyle(.menu)
+
             Toggle("Disable Motion", isOn: configManager.disableMotion)
 
             //TextField("DSU Host", text: configManager.dsuHost)
@@ -455,6 +462,12 @@ struct SettingsView: View {
 
             //TextField("DSU Port", text: configManager.dsuPortString)
             //    .keyboardType(.numberPad)
+        } header: {
+            Text("Input Sources")
+        } footer: {
+            Text(controllerManager.motionSource == .device
+                 ? "Use this device’s motion sensors with your controller’s buttons and sticks."
+                 : "Use each controller’s built-in motion sensors, if supported. Touch controls use this phone or tablet’s sensors.")
         }
     }
 

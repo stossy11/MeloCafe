@@ -127,31 +127,36 @@ public:
 		m_accMagnitude = sqrtf(m_acc[0] * m_acc[0] + m_acc[1] * m_acc[1] + m_acc[2] * m_acc[2]);
 	}
 
+    // Convert the physical iOS sensor convention to the game's horizontal
+    // convention at the output boundary. Keep fusion in a proper rotation frame.
+    MotionSample withReversedHorizontalAxes() const
+    {
+        auto result = *this;
+        result.m_outputAxes = m_outputAxes == OutputAxes::GamePad ? OutputAxes::Original : OutputAxes::GamePad;
+        return result;
+    }
+
 	void getVPADOrientation(float orientation[3])
 	{
-		orientation[0] = m_orientation[0];
-		orientation[1] = m_orientation[1];
-		orientation[2] = m_orientation[2];
+		orientation[0] = reverseAxis(0) ? -m_orientation[0] : m_orientation[0];
+		orientation[1] = reverseAxis(1) ? -m_orientation[1] : m_orientation[1];
+		orientation[2] = reverseAxis(2) ? -m_orientation[2] : m_orientation[2];
 	}
 
 	void getVPADGyroChange(float gyro[3])
-	{
-		// filter noise
-		if (fabs(gyro[0]) < 0.012f)
-			gyro[0] = 0.0f;
-		if (fabs(gyro[1]) < 0.012f)
-			gyro[1] = 0.0f;
-		if (fabs(gyro[2]) < 0.012f)
-			gyro[2] = 0.0f;
-		// convert
-		gyro[0] = _radToOrientation(-m_gyro[0]);
-		gyro[1] = _radToOrientation(-m_gyro[1]);
-		gyro[2] = _radToOrientation(m_gyro[2]);
-	}
+    {
+        // Never read the caller's uninitialized output buffer while filtering.
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const auto value = std::abs(m_gyro[axis]) < 0.012f ? 0.0f : m_gyro[axis];
+            gyro[axis] = _radToOrientation(axis == 2 ? value : -value);
+            if (reverseAxis(axis)) gyro[axis] = -gyro[axis];
+        }
+    }
 
 	void getVPADAccelerometer(float acc[3])
 	{
-		acc[0] = -m_acc[0];
+		acc[0] = m_outputAxes != OutputAxes::Original ? m_acc[0] : -m_acc[0];
 		acc[1] = -m_acc[1];
 		acc[2] = m_acc[2];
 	}
@@ -203,6 +208,12 @@ public:
  		getXVector(mtx + 0, qImu);
 		getXVector(mtx + 3, qY);
 		getXVector(mtx + 6, qZ);
+        if (m_outputAxes == OutputAxes::GamePad)
+        {
+            // S * direction * S, S = diag(-1, 1, 1): yaw and roll reverse,
+            // pitch stays unchanged, and the basis remains orthonormal.
+            for (int i : {1, 2, 3, 6}) mtx[i] = -mtx[i];
+        }
 	}
 
 	static float calculateAccAcceleration(float prevAcc[3], float currentAcc[3])
@@ -243,6 +254,12 @@ private:
 	float m_accAcceleration{};
 	float m_orientation[3]{};
 	float m_q[4]{};
+    enum class OutputAxes { Original, GamePad };
+    OutputAxes m_outputAxes = OutputAxes::Original;
+    bool reverseAxis(int axis) const
+    {
+        return m_outputAxes == OutputAxes::GamePad && axis != 0;
+    }
 	// calculated values
 	float m_accMagnitude{};
 };
