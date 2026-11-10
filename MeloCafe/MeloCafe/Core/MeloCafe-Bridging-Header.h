@@ -8,6 +8,7 @@
 #define MeloCafeHeader
 #include <UIKit/UIKit.h>
 #include "Controller/CemuController.h"
+#include "../../../src/input/api/Wiimote/BLEWiimoteBridge.h"
 #include "../../../src/config/CemuConfigWrapper.h"
 #include "../../../src/config/GraphicPackWrapper.h"
 #include "../../../src/gui/uikit/EmulatedUSBDevices.h"

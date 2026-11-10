@@ -69,6 +69,8 @@ if (SUPPORTS_WIIMOTE)
 	target_sources(CemuInput PRIVATE
 			api/Wiimote/WiimoteControllerProvider.h
 			api/Wiimote/WiimoteControllerProvider.cpp
+			api/Wiimote/WiiExtensionProtocol.cpp
+			api/Wiimote/WiiExtensionProtocol.h
 			api/Wiimote/WiimoteMessages.h
 			api/Wiimote/NativeWiimoteController.h
 			api/Wiimote/NativeWiimoteController.cpp
@@ -89,6 +91,9 @@ endif ()
 
 if(IOS)
 	target_sources(CemuInput PRIVATE
+		api/Wiimote/BLEWiimoteDevice.cpp
+		api/Wiimote/BLEWiimoteDevice.h
+		api/Wiimote/BLEWiimoteBridge.h
 		api/iOS/GCController.h
 		api/iOS/GCController.mm
 		api/iOS/GCControllerProvider.h

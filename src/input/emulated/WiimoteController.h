@@ -41,7 +41,7 @@ public:
 	WiimoteController(size_t player_index);
 
 	Type type() const override { return Type::Wiimote; }
-	WPADDeviceType get_device_type() const override { return m_device_type; }
+	WPADDeviceType get_device_type() const override;
 	void set_device_type(WPADDeviceType device_type);
 
 	bool is_mpls_attached() override;

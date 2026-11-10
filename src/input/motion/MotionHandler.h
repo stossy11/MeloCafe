@@ -7,6 +7,7 @@
 class WiiUMotionHandler
 {
 public:
+    bool alignToGravity(float ax, float ay, float az) { return m_imu.alignToGravity(ax, ay, az); }
 	// gyro is in radians/sec
 	void processMotionSample(
 		float deltaTime,

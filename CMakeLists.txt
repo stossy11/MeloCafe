@@ -156,6 +156,7 @@ option(ENABLE_DISCORD_RPC "Enables the Discord Rich Presence feature" ON)
 option(ENABLE_APPSTORE "Causes all Private API usages to be subbed out." OFF)
 
 if (IOS)
+	set(SUPPORTS_WIIMOTE ON)
 	set(ENABLE_OPENGL OFF CACHE BOOL "OpenGL is not supported on iOS" FORCE)
 	set(ENABLE_VULKAN ON CACHE BOOL "Vulkan is enabled for MeloCafe on iOS" FORCE)
 	set(ENABLE_METAL ON CACHE BOOL "Metal is required on iOS" FORCE)

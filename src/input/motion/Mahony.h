@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <cmath>
+#include <algorithm>
 #include "util/math/quaternion.h"
 
 class MahonySensorFusion
@@ -12,6 +13,35 @@ public:
 		// assume default forward pose (holding controller in hand, tilted forward so the sticks/buttons face upward)
 		m_imuQ.Assign(sqrtf(0.5), sqrtf(0.5), 0.0f, 0.0f);
 	}
+
+    // Initialize/recover tilt from stationary gravity without declaring the
+    // current pose "flat" or changing gyro bias. Only the Wii adapter calls this.
+    bool alignToGravity(float ax, float ay, float az)
+    {
+        Vector3f measured(ax, ay, az);
+        const float length = measured.Length();
+        if (!std::isfinite(length) || length < .85f || length > 1.15f) return false;
+        measured.Scale(1 / length);
+        const auto predicted = m_imuQ.GetVectorZ();
+        const float dot = std::clamp(measured.Dot(predicted), -1.0f, 1.0f);
+        Quaternionf correction;
+        if (dot < -.9999f)
+        {
+            // Cross-product feedback alone is zero when started face down.
+            auto axis = measured.Cross(std::abs(measured.x) < .9f ? Vector3f(1, 0, 0) : Vector3f(0, 1, 0));
+            axis.Normalize();
+            correction.Assign(0, axis.x, axis.y, axis.z);
+        }
+        else
+        {
+            const auto axis = measured.Cross(predicted);
+            correction.Assign(1 + dot, axis.x, axis.y, axis.z);
+            correction.NormalizeXYZW();
+        }
+        m_imuQ *= correction;
+        m_imuQ.NormalizeXYZW();
+        return true;
+    }
 
 	// gx, gy, gz are in radians/sec
 	void updateIMU(float deltaTime, float gx, float gy, float gz, float ax, float ay, float az, bool learnGyroBias = true)

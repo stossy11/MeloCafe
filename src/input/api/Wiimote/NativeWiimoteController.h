@@ -31,9 +31,12 @@ public:
 	bool is_connected() override;
 
 	void set_player_index(size_t player_index);
+    std::optional<size_t> preferred_player_index() const { return m_provider->preferred_player_index(m_index); }
 
 	Extension get_extension() const;
 	bool is_mpls_attached() const;
+	void calibrate_gyro(bool start) { m_provider->calibrate_gyro(m_index, start); }
+	WiimoteControllerProvider::WiimoteState get_native_state() const { return m_provider->get_state(m_index); }
 
 	ControllerState raw_state() override;
 
