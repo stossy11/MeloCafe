@@ -13,6 +13,7 @@
 #include "util/helpers/fspinlock.h"
 #ifdef ENABLE_METAL
 #include "Cafe/HW/Latte/Renderer/Metal/LatteToMtl.h"
+#include "Cafe/HW/Latte/Renderer/Metal/MetalVertexBufferBounds.h"
 #endif
 #include <openssl/sha.h> /* SHA1_DIGEST_LENGTH */
 #include <openssl/evp.h> /* EVP_Digest */
@@ -179,25 +180,49 @@ void LatteFetchShader::CalculateFetchShaderVkHash()
 }
 
 #ifdef ENABLE_METAL
-void LatteFetchShader::CheckIfVerticesNeedManualFetchMtl(uint32* contextRegister)
+uint64 LatteParsedFetchShaderBufferGroup_t::getRequiredBufferSizeMtl(uint32 stride, uint32 maxVertexIndex,
+	uint32 baseInstance, uint32 instanceCount, const sint8* attributeMapping) const
 {
-	for (sint32 g = 0; g < bufferGroups.size(); g++)
+	if (!instanceCount)
+		return 0;
+	uint64 required = 0;
+	for (sint32 j = 0; j < attribCount; ++j)
 	{
-	    LatteParsedFetchShaderBufferGroup_t& group = bufferGroups[g];
-		uint32 bufferIndex = group.attributeBufferIndex;
-		uint32 bufferBaseRegisterIndex = mmSQ_VTX_ATTRIBUTE_BLOCK_START + bufferIndex * 7;
-		uint32 bufferStride = (contextRegister[bufferBaseRegisterIndex + 2] >> 11) & 0xFFFF;
-
-  		if (bufferStride % 4 != 0)
-  		    mtlFetchVertexManually = true;
-
-  		for (sint32 f = 0; f < group.attribCount; f++)
-  		{
-  		    auto& attr = group.attrib[f];
-  		    if (attr.offset + GetMtlVertexFormatSize(attr.format) > bufferStride)
- 			    mtlFetchVertexManually = true;
-  		}
+		const auto& attr = attrib[j];
+		if (attributeMapping[attr.semanticId] < 0)
+			continue;
+		const uint32 size = GetMtlVertexFormatSize(attr.format);
+		if (!size)
+			return UINT64_MAX;
+		uint64 lastIndex = 0;
+		if (stride && attr.fetchType == LatteConst::VertexFetchType2::VERTEX_DATA)
+			lastIndex = maxVertexIndex;
+		else if (stride && attr.fetchType == LatteConst::VertexFetchType2::INSTANCE_DATA)
+			lastIndex = uint64(baseInstance) + instanceCount - 1;
+		if (lastIndex > UINT32_MAX)
+			return UINT64_MAX;
+		required = std::max(required, MetalVertexBufferBounds::AttributeEnd(lastIndex, stride, attr.offset, size));
 	}
+	return required;
+}
+
+bool LatteFetchShader::NeedsManualFetchMtl(const uint32* contextRegister) const
+{
+	// The fetch program is cached independently of the vertex buffer registers.
+	// Derive this from the caller's state, including background compiler snapshots.
+	for (const auto& group : bufferGroups)
+	{
+		const uint32 stride = (contextRegister[mmSQ_VTX_ATTRIBUTE_BLOCK_START + group.attributeBufferIndex * 7 + 2] >> 11) & 0xFFFF;
+		if (stride % 4 != 0)
+			return true;
+		for (sint32 f = 0; f < group.attribCount; ++f)
+		{
+			const auto& attr = group.attrib[f];
+			if (uint64(attr.offset) + GetMtlVertexFormatSize(attr.format) > stride)
+				return true;
+		}
+	}
+	return false;
 }
 #endif
 
@@ -383,9 +408,6 @@ LatteFetchShader* LatteShaderRecompiler_createFetchShader(LatteFetchShader::Cach
 		// these only make sense when vertex shader does not call FS?
 		LatteShader_calculateFSKey(newFetchShader);
 		newFetchShader->CalculateFetchShaderVkHash();
-#ifdef ENABLE_METAL
-		newFetchShader->CheckIfVerticesNeedManualFetchMtl(contextRegister);
-#endif
 		return newFetchShader;
 	}
 
@@ -445,9 +467,6 @@ LatteFetchShader* LatteShaderRecompiler_createFetchShader(LatteFetchShader::Cach
 	}
 	LatteShader_calculateFSKey(newFetchShader);
 	newFetchShader->CalculateFetchShaderVkHash();
-#ifdef ENABLE_METAL
-	newFetchShader->CheckIfVerticesNeedManualFetchMtl(contextRegister);
-#endif
 
 	// register in cache
 	// its possible that during multi-threaded shader cache loading, two identical (same hash) fetch shaders get created simultaneously

@@ -4,7 +4,7 @@
 
 namespace MetalVertexBufferBounds
 {
-constexpr std::uint64_t AttributeEnd(std::uint32_t lastIndex, std::uint32_t stride,
+constexpr std::uint64_t AttributeEnd(std::uint64_t lastIndex, std::uint32_t stride,
     std::uint32_t attributeOffset, std::uint32_t attributeSize)
 {
     return std::uint64_t(lastIndex) * stride + attributeOffset + attributeSize;

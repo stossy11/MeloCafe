@@ -59,6 +59,13 @@ public:
 		m_vertexBufferChanged = true;
 		m_uniformBufferChanged = true;
 		g_renderer->draw_beginSequence();
+#ifdef ENABLE_METAL
+		if (g_renderer->GetType() == RendererAPI::Metal)
+		{
+			for (uint32 i = 0; i < LATTE_MAX_VERTEX_BUFFERS; ++i)
+				m_vertexBufferStrides[i] = (LatteGPUState.contextRegister[mmSQ_VTX_ATTRIBUTE_BLOCK_START + i * 7 + 2] >> 11) & 0xffff;
+		}
+#endif
 	}
 
 	void executeDraw(uint32 count, bool isAutoIndex, MPTR physIndices)
@@ -96,6 +103,20 @@ public:
 	void notifyModifiedVertexBuffer() 
 	{
 		m_vertexBufferChanged = true;
+#ifdef ENABLE_METAL
+		if (g_renderer->GetType() == RendererAPI::Metal)
+		{
+			for (uint32 i = 0; i < LATTE_MAX_VERTEX_BUFFERS; ++i)
+			{
+				const uint32 stride = (LatteGPUState.contextRegister[mmSQ_VTX_ATTRIBUTE_BLOCK_START + i * 7 + 2] >> 11) & 0xffff;
+				if (stride != m_vertexBufferStrides[i])
+				{
+					endDrawPass();
+					return;
+				}
+			}
+		}
+#endif
 	}
 
 	void notifyModifiedUniformBuffer()
@@ -125,6 +146,9 @@ private:
 	bool m_drawPassActive{ false };
 	bool m_isFirstDraw{false};
 	bool m_vertexBufferChanged{ false };
+#ifdef ENABLE_METAL
+	uint32 m_vertexBufferStrides[LATTE_MAX_VERTEX_BUFFERS]{};
+#endif
 	bool m_uniformBufferChanged{ false };
 	boost::container::small_vector<CmdQueuePos, 4> m_queuePosStack;
 };
@@ -155,11 +179,6 @@ uint32 LatteCP_readU32Deprc()
 		const auto workGeneration = Latte_GetWorkEvent().Snapshot();
 		g_renderer->NotifyLatteCommandProcessorIdle(); // let the renderer know in case it wants to flush any commands
 		performanceMonitor.gpuTime_idleTime.beginMeasuring();
-		// no command data available, spin in a busy loop for a bit then check again
-		for (sint32 busy = 0; busy < 80; busy++)
-		{
-			_mm_pause();
-		}
 		LatteThread_HandleOSScreen(); // check if new frame was presented via OSScreen API
 
 		if ( TCL::TCLGPUReadRBWord(cmdWord) )
@@ -180,8 +199,8 @@ uint32 LatteCP_readU32Deprc()
 			performanceMonitor.gpuTime_idleTime.endMeasuring();
 			return cmdWord;
 		}
-		Latte_GetWorkEvent().WaitUntil(workGeneration, LatteTiming_GetNextVsyncDeadline(),
-			g_renderer->GetIdleSubmissionDeadline());
+		Latte_GetWorkEvent().WaitUntil(workGeneration,
+			std::min(LatteTiming_GetNextVsyncDeadline(), g_renderer->GetIdleSubmissionDeadline()));
 		performanceMonitor.gpuTime_idleTime.endMeasuring();
 	}
 	UNREACHABLE;
@@ -936,8 +955,8 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 		if (Latte_GetStopSignal())
 			LatteThread_Exit();
 		if (currentFlipCount == LatteGPUState.flipCounter)
-			Latte_GetWorkEvent().WaitUntil(workGeneration, LatteTiming_GetNextVsyncDeadline(),
-				g_renderer->GetIdleSubmissionDeadline());
+			Latte_GetWorkEvent().WaitUntil(workGeneration,
+				std::min(LatteTiming_GetNextVsyncDeadline(), g_renderer->GetIdleSubmissionDeadline()));
 	}
 	return cmd;
 }

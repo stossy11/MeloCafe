@@ -1,5 +1,6 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/VKRMemoryManager.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
+#include "util/helpers/ThreadQoS.h"
 #include <imgui.h>
 
 /* VKRSynchronizedMemoryBuffer */
@@ -589,6 +590,7 @@ VkImageMemAllocation* VKRMemoryManager::imageMemoryAllocate(VkImage image)
 	CHAddr mem = texHeap->allocMem(allocationSize, (uint32)memRequirements.alignment);
 	if (!mem.isValid())
 	{
+		ScopedThreadQoS qos;
 		// allocation failed, try to make space by deleting textures
 		// todo - improve this algorithm
 		std::vector<LatteTexture*> deleteableTextures = LatteTC_GetDeleteableTextures();

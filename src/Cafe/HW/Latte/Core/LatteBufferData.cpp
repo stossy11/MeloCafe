@@ -196,6 +196,20 @@ bool LatteBufferCache_Sync(uint32 minIndex, uint32 maxIndex, uint32 baseInstance
 		}
 		if (requiredSize == 0 || bufferStride == 0)
 			requiredSize += 128;
+
+#ifdef ENABLE_METAL
+		if (g_renderer->GetType() == RendererAPI::Metal)
+		{
+			const auto* vertexShader = LatteSHRC_GetActiveVertexShader();
+			if (!vertexShader)
+				return false;
+			
+			requiredSize = bufferGroup.getRequiredBufferSizeMtl(bufferStride, maxIndex, baseInstance,
+				instanceCount, vertexShader->resourceMapping.attributeMapping);
+			if (!requiredSize)
+				continue;
+		}
+#endif
 		
 		if (requiredSize > UINT32_MAX || uint64(bufferAddress) + requiredSize + 0x3ff > UINT32_MAX)
 			return false;

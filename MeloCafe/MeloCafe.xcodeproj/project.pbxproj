@@ -10,20 +10,12 @@
 		4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F4372F5A950A003D2387 /* GameController.framework */; };
 		4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E95F3FC2F599094003D2387 /* Metal.framework */; };
 		4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E442DEC2F5DB3EC00DD0F47 /* Melo-Controller */; };
-		4E670F9D307D8FDC00791580 /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E670F9C307D8FDC00791580 /* UniformTypeIdentifiers.framework */; };
-		4E670FA9307D8FDC00791580 /* MeloCafeRamDonor.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 4E670F9B307D8FDC00791580 /* MeloCafeRamDonor.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		4EEB1C5130862AAE0026926E /* Cemu.framework/Cemu in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EEB1C3630862A980026926E /* Cemu.framework/Cemu */; };
-		4EEB1C5230862AAE0026926E /* Cemu.framework/Cemu in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4EEB1C3630862A980026926E /* Cemu.framework/Cemu */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		4EEB1C5130862AAE0026926E /* Cemu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EEB1C3630862A980026926E /* Cemu.framework */; };
+		4EEB1C5230862AAE0026926E /* Cemu.framework in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4EEB1C3630862A980026926E /* Cemu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AD0B00000000000000000009 /* MeloCafeMemoryHelper.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = AD0B00000000000000000004 /* MeloCafeMemoryHelper.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		4E670FA7307D8FDC00791580 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 4E1B36CF2F5924AF00D151B0 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 4E670F9A307D8FDC00791580;
-			remoteInfo = MeloCafeRamDonor;
-		};
 		4E6D8D34308755D100D834B2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 4EEB1C1E30862A970026926E /* Cemu.xcodeproj */;
@@ -38,6 +30,20 @@
 			remoteGlobalIDString = B8C8930763394E3D9BA8D0BF;
 			remoteInfo = CemuBin;
 		};
+		AD0B0000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4E1B36CF2F5924AF00D151B0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AD0B00000000000000000002;
+			remoteInfo = MeloCafeMemoryHelper;
+		};
+		AD0C00000000000000000005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4E1B36CF2F5924AF00D151B0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4E1B36D62F5924AF00D151B0;
+			remoteInfo = MeloCafe;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -47,53 +53,36 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				4EEB1C5230862AAE0026926E /* Cemu.framework/Cemu in Embed Libraries */,
+				4EEB1C5230862AAE0026926E /* Cemu.framework in Embed Libraries */,
 			);
 			name = "Embed Libraries";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		4E670FAA307D8FDC00791580 /* Embed Foundation Extensions */ = {
+		AD0B0000000000000000000A /* Embed ExtensionKit Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
 			files = (
+				AD0B00000000000000000009 /* MeloCafeMemoryHelper.appex in Embed ExtensionKit Extensions */,
 			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		4E67106C307E301D00791580 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				4E670FA9307D8FDC00791580 /* MeloCafeRamDonor.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
+			name = "Embed ExtensionKit Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		4E1B36D72F5924AF00D151B0 /* MeloCafe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeloCafe.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		4E670F9B307D8FDC00791580 /* MeloCafeRamDonor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeloCafeRamDonor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		4E670F9C307D8FDC00791580 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		4E95F3FC2F599094003D2387 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		4E95F4372F5A950A003D2387 /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		4E95F4392F5A950F003D2387 /* TouchController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = TouchController.framework; path = System/Library/Frameworks/TouchController.framework; sourceTree = SDKROOT; };
 		4EEB1C1B30862A5A0026926E /* Cemu.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = Cemu.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EEB1C1E30862A970026926E /* Cemu.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = Cemu.xcodeproj; path = ../build/Cemu.xcodeproj; sourceTree = SOURCE_ROOT; };
+		AD0B00000000000000000004 /* MeloCafeMemoryHelper.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = MeloCafeMemoryHelper.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD0C00000000000000000002 /* MeloCafeMemoryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeloCafeMemoryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		4E670FAE307D8FDC00791580 /* Exceptions for "MeloCafeRamDonor" folder in "MeloCafeRamDonor" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 4E670F9A307D8FDC00791580 /* MeloCafeRamDonor */;
-		};
 		4E95F3FB2F597E04003D2387 /* Exceptions for "MeloCafe" folder in "MeloCafe" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -133,12 +122,19 @@
 			path = MeloCafe;
 			sourceTree = "<group>";
 		};
-		4E670F9E307D8FDC00791580 /* MeloCafeRamDonor */ = {
+		AD0B00000000000000000006 /* MeloCafeMemoryHelper */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				4E670FAE307D8FDC00791580 /* Exceptions for "MeloCafeRamDonor" folder in "MeloCafeRamDonor" target */,
-			);
-			path = MeloCafeRamDonor;
+			path = MeloCafeMemoryHelper;
+			sourceTree = "<group>";
+		};
+		AD0B00000000000000000007 /* MeloCafeRamDonorShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MeloCafeRamDonorShared;
+			sourceTree = "<group>";
+		};
+		AD0C00000000000000000003 /* MeloCafeMemoryTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MeloCafeMemoryTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -148,18 +144,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4EEB1C5130862AAE0026926E /* Cemu.framework/Cemu in Frameworks */,
+				4EEB1C5130862AAE0026926E /* Cemu.framework in Frameworks */,
 				4E442DED2F5DB3EC00DD0F47 /* Melo-Controller in Frameworks */,
 				4E442DAE2F5D5C5700DD0F47 /* Metal.framework in Frameworks */,
 				4E36B5902F824F28009A2F1A /* GameController.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		4E670F98307D8FDC00791580 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				4E670F9D307D8FDC00791580 /* UniformTypeIdentifiers.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,7 +159,9 @@
 			children = (
 				4EEB1C1E30862A970026926E /* Cemu.xcodeproj */,
 				4E1B36D92F5924AF00D151B0 /* MeloCafe */,
-				4E670F9E307D8FDC00791580 /* MeloCafeRamDonor */,
+				AD0B00000000000000000006 /* MeloCafeMemoryHelper */,
+				AD0B00000000000000000007 /* MeloCafeRamDonorShared */,
+				AD0C00000000000000000003 /* MeloCafeMemoryTests */,
 				4EE53AF12F596CDF008E8A2A /* Frameworks */,
 				4E1B36D82F5924AF00D151B0 /* Products */,
 			);
@@ -181,7 +171,8 @@
 			isa = PBXGroup;
 			children = (
 				4E1B36D72F5924AF00D151B0 /* MeloCafe.app */,
-				4E670F9B307D8FDC00791580 /* MeloCafeRamDonor.appex */,
+				AD0B00000000000000000004 /* MeloCafeMemoryHelper.appex */,
+				AD0C00000000000000000002 /* MeloCafeMemoryTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -193,7 +184,6 @@
 				4E95F4392F5A950F003D2387 /* TouchController.framework */,
 				4E95F4372F5A950A003D2387 /* GameController.framework */,
 				4E95F3FC2F599094003D2387 /* Metal.framework */,
-				4E670F9C307D8FDC00791580 /* UniformTypeIdentifiers.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -201,7 +191,7 @@
 		4EEB1C1F30862A970026926E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4EEB1C3630862A980026926E /* Cemu.framework/Cemu */,
+				4EEB1C3630862A980026926E /* Cemu.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -217,17 +207,17 @@
 				4E1B36D42F5924AF00D151B0 /* Frameworks */,
 				4E1B36D52F5924AF00D151B0 /* Resources */,
 				4E1B371B2F592B6F00D151B0 /* Embed Libraries */,
-				4E670FAA307D8FDC00791580 /* Embed Foundation Extensions */,
-				4E67106C307E301D00791580 /* Embed App Extensions */,
+				AD0B0000000000000000000A /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				4E6D8D35308755D100D834B2 /* PBXTargetDependency */,
-				4E670FA8307D8FDC00791580 /* PBXTargetDependency */,
+				AD0B0000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4E1B36D92F5924AF00D151B0 /* MeloCafe */,
+				AD0B00000000000000000007 /* MeloCafeRamDonorShared */,
 			);
 			name = MeloCafe;
 			packageProductDependencies = (
@@ -237,27 +227,43 @@
 			productReference = 4E1B36D72F5924AF00D151B0 /* MeloCafe.app */;
 			productType = "com.apple.product-type.application";
 		};
-		4E670F9A307D8FDC00791580 /* MeloCafeRamDonor */ = {
+		AD0B00000000000000000002 /* MeloCafeMemoryHelper */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 4E670FAD307D8FDC00791580 /* Build configuration list for PBXNativeTarget "MeloCafeRamDonor" */;
+			buildConfigurationList = AD0B00000000000000000010 /* Build configuration list for PBXNativeTarget "MeloCafeMemoryHelper" */;
 			buildPhases = (
-				4E670F97307D8FDC00791580 /* Sources */,
-				4E670F98307D8FDC00791580 /* Frameworks */,
-				4E670F99307D8FDC00791580 /* Resources */,
+				AD0B0000000000000000000E /* Sources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				4E670F9E307D8FDC00791580 /* MeloCafeRamDonor */,
+				AD0B00000000000000000006 /* MeloCafeMemoryHelper */,
+				AD0B00000000000000000007 /* MeloCafeRamDonorShared */,
 			);
-			name = MeloCafeRamDonor;
-			packageProductDependencies = (
+			name = MeloCafeMemoryHelper;
+			productName = MeloCafeMemoryHelper;
+			productReference = AD0B00000000000000000004 /* MeloCafeMemoryHelper.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
+		AD0C00000000000000000001 /* MeloCafeMemoryTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AD0C00000000000000000007 /* Build configuration list for PBXNativeTarget "MeloCafeMemoryTests" */;
+			buildPhases = (
+				AD0C00000000000000000004 /* Sources */,
 			);
-			productName = MeloCafeRamDonor;
-			productReference = 4E670F9B307D8FDC00791580 /* MeloCafeRamDonor.appex */;
-			productType = "com.apple.product-type.app-extension";
+			buildRules = (
+			);
+			dependencies = (
+				AD0C00000000000000000006 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AD0C00000000000000000003 /* MeloCafeMemoryTests */,
+			);
+			name = MeloCafeMemoryTests;
+			productName = MeloCafeMemoryTests;
+			productReference = AD0C00000000000000000002 /* MeloCafeMemoryTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -273,9 +279,8 @@
 						CreatedOnToolsVersion = 26.2;
 						LastSwiftMigration = 2620;
 					};
-					4E670F9A307D8FDC00791580 = {
-						CreatedOnToolsVersion = 27.0;
-						LastSwiftMigration = 2700;
+					AD0C00000000000000000001 = {
+						TestTargetID = 4E1B36D62F5924AF00D151B0;
 					};
 				};
 			};
@@ -303,16 +308,16 @@
 			projectRoot = "";
 			targets = (
 				4E1B36D62F5924AF00D151B0 /* MeloCafe */,
-				4E670F9A307D8FDC00791580 /* MeloCafeRamDonor */,
+				AD0B00000000000000000002 /* MeloCafeMemoryHelper */,
+				AD0C00000000000000000001 /* MeloCafeMemoryTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXReferenceProxy section */
-		4EEB1C3630862A980026926E /* Cemu.framework/Cemu */ = {
+		4EEB1C3630862A980026926E /* Cemu.framework */ = {
 			isa = PBXReferenceProxy;
 			fileType = wrapper.framework;
-			name = Cemu.framework/Cemu;
 			path = Cemu.framework;
 			remoteRef = 4EEB1C3530862A980026926E /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
@@ -321,13 +326,6 @@
 
 /* Begin PBXResourcesBuildPhase section */
 		4E1B36D52F5924AF00D151B0 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		4E670F99307D8FDC00791580 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -344,7 +342,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		4E670F97307D8FDC00791580 /* Sources */ = {
+		AD0B0000000000000000000E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AD0C00000000000000000004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -354,15 +359,20 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		4E670FA8307D8FDC00791580 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 4E670F9A307D8FDC00791580 /* MeloCafeRamDonor */;
-			targetProxy = 4E670FA7307D8FDC00791580 /* PBXContainerItemProxy */;
-		};
 		4E6D8D35308755D100D834B2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = CemuBin;
 			targetProxy = 4E6D8D34308755D100D834B2 /* PBXContainerItemProxy */;
+		};
+		AD0B0000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AD0B00000000000000000002 /* MeloCafeMemoryHelper */;
+			targetProxy = AD0B0000000000000000000B /* PBXContainerItemProxy */;
+		};
+		AD0C00000000000000000006 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4E1B36D62F5924AF00D151B0 /* MeloCafe */;
+			targetProxy = AD0C00000000000000000005 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -498,7 +508,7 @@
 				CODE_SIGN_ENTITLEMENTS = MeloCafe/MeloCafe.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_TEAM = 4D52P7Z7YN;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -531,11 +541,11 @@
 					"$(PROJECT_DIR)/MeloCafe",
 					"$(PROJECT_DIR)/MeloCafe/Depedencies",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				OTHER_CFLAGS = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-Wl,-lc++abi";
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloCafe;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -561,7 +571,7 @@
 				CODE_SIGN_ENTITLEMENTS = MeloCafe/MeloCafe.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_TEAM = 4D52P7Z7YN;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -593,11 +603,11 @@
 					"$(PROJECT_DIR)/MeloCafe",
 					"$(PROJECT_DIR)/MeloCafe/Depedencies",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				OTHER_CFLAGS = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
 				OTHER_LDFLAGS = "-Wl,-lc++abi";
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloCafe;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -612,74 +622,107 @@
 			};
 			name = Release;
 		};
-		4E670FAB307D8FDC00791580 /* Debug */ = {
+		AD0B00000000000000000013 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_ENABLE_MODULES = YES;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MeloCafeMemoryHelper/MemoryHelper.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4D52P7Z7YN;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"MLX_PUBLIC_DONOR=1",
-				);
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = MeloCafeRamDonor/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = MeloCafeRamDonor;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_CFBundleDisplayName = MeloCafeMemoryHelper;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloCafe.MeloCafeRamDonor;
+				MARKETING_VERSION = 1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe.MemoryHelper";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "MeloCafeRamDonor/MeloCafeRamDonor-Bridging-Header.h";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "MeloCafeMemoryHelper/MemoryHelper-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		4E670FAC307D8FDC00791580 /* Release */ = {
+		AD0B00000000000000000014 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_ENABLE_MODULES = YES;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MeloCafeMemoryHelper/MemoryHelper.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4D52P7Z7YN;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"MLX_PUBLIC_DONOR=1",
-				);
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = MeloCafeRamDonor/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = MeloCafeRamDonor;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_CFBundleDisplayName = MeloCafeMemoryHelper;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloCafe.MeloCafeRamDonor;
+				MARKETING_VERSION = 1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe.MemoryHelper";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "MeloCafeRamDonor/MeloCafeRamDonor-Bridging-Header.h";
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "MeloCafeMemoryHelper/MemoryHelper-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AD0C00000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe.MemoryTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MeloCafe.app/MeloCafe";
+			};
+			name = Debug;
+		};
+		AD0C00000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.-YourName-.MeloCafe.MemoryTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MeloCafe.app/MeloCafe";
 			};
 			name = Release;
 		};
@@ -704,14 +747,23 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		4E670FAD307D8FDC00791580 /* Build configuration list for PBXNativeTarget "MeloCafeRamDonor" */ = {
+		AD0B00000000000000000010 /* Build configuration list for PBXNativeTarget "MeloCafeMemoryHelper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4E670FAB307D8FDC00791580 /* Debug */,
-				4E670FAC307D8FDC00791580 /* Release */,
+				AD0B00000000000000000013 /* Debug */,
+				AD0B00000000000000000014 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+		};
+		AD0C00000000000000000007 /* Build configuration list for PBXNativeTarget "MeloCafeMemoryTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AD0C00000000000000000008 /* Debug */,
+				AD0C00000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 

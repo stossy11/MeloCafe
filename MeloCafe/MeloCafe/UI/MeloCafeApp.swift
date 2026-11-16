@@ -3,41 +3,80 @@ import SwiftUI
 import GameController
 import Combine
 
+func checkDebugged() -> Bool {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    info.kp_proc.p_flag = 0
+
+    let result = mib.withUnsafeMutableBufferPointer { mibPtr in
+        sysctl(mibPtr.baseAddress, UInt32(mibPtr.count), &info, &size, nil, 0)
+    }
+
+    if result != 0 {
+        return false
+    }
+
+    return (info.kp_proc.p_flag & P_TRACED) != 0
+}
+
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 1)
+        GuestSwap.clearOnLaunch()
+        setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "1", 1)
         setenv("MVK_CONFIG_DEBUG", "0", 1)
-        setenv("MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", "128", 1)
-        CemuManager.initialize()
+        setenv("MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", "64", 1)
+        setenv("MELOCAFE_DEBUG", checkDebugged() ? "1" : "0", 1)
         return true
     }
 }
 
 final class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private var pendingURLs: [URL] = []
+    private var starting = false
     
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        let controller: ContentHostingController
-        if #available(iOS 27.0, *) {
-            controller = AccessoryContentHostingController()
-        } else {
-            controller = ContentHostingController()
-        }
         let window = UIWindow(windowScene: windowScene)
         self.window = window
-        
-        CemuUIKit_SetMainWindow(window)
-        window.rootViewController = controller
-        controller.open(connectionOptions.urlContexts.map(\.url))
+        starting = false
+        pendingURLs.append(contentsOf: connectionOptions.urlContexts.map(\.url))
+        window.rootViewController = UIHostingController(rootView: ProgressView("Starting MeloCafe…"))
         window.makeKeyAndVisible()
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        guard let window, window.windowScene === scene, !starting else { return }
+        starting = true
+
+        Task { [weak self, weak window] in
+            await CemuManager.initialize()
+            guard let self, let window, self.window === window else { return }
+
+            let controller: ContentHostingController
+            if #available(iOS 27.0, *) {
+                controller = AccessoryContentHostingController()
+            } else {
+                controller = ContentHostingController()
+            }
+            CemuUIKit_SetMainWindow(window)
+            controller.open(pendingURLs)
+            pendingURLs.removeAll()
+            window.rootViewController = controller
+        }
     }
     
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        (window?.rootViewController as? ContentHostingController)?.open(URLContexts.map(\.url))
+        let urls = URLContexts.map(\.url)
+        if let controller = window?.rootViewController as? ContentHostingController {
+            controller.open(urls)
+        } else {
+            pendingURLs.append(contentsOf: urls)
+        }
     }
 }
 

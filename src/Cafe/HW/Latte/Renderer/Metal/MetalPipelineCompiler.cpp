@@ -445,7 +445,7 @@ void MetalPipelineCompiler::InitFromStateRender(const LatteFetchShader* fetchSha
 	desc->fragmentBuffers()->object(MetalArgumentBuffer::BindingIndex)->setMutability(MTL::MutabilityImmutable);
 
     // Vertex descriptor
-    if (!fetchShader->mtlFetchVertexManually && !vertexShader->hasStreamoutBufferWrite)
+    if (!fetchShader->NeedsManualFetchMtl(lcr.GetRawView()) && !vertexShader->hasStreamoutBufferWrite)
     {
     	NS_STACK_SCOPED MTL::VertexDescriptor* vertexDescriptor = MTL::VertexDescriptor::alloc()->init();
     	for (auto& bufferGroup : fetchShader->bufferGroups)

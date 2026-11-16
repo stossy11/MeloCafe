@@ -53,9 +53,8 @@ HLECALL PPCInterpreter_getHLECall(HLEIDX funcIndex)
 
 std::mutex s_hleLogMutex;
 
-void PPCInterpreter_virtualHLE(PPCInterpreter_t* hCPU, unsigned int opcode)
+void PPCInterpreter_executeHLE(PPCInterpreter_t* hCPU, uint32 hleFuncId)
 {
-	uint32 hleFuncId = opcode & 0xFFFF;
 	if (hleFuncId == 0xFFD0) [[unlikely]]
 	{
 		s_hleLogMutex.lock();

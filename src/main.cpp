@@ -468,10 +468,11 @@ unsigned long long CemuLoadFile(const char* launchPath, bool load)
 
 bool offer_donated_memory(void* base, uint64_t size)
 {
+    if (!base || size != 0x100000000ULL)
+        return false;
     offer_donated_mem((uint8*)base, size);
+    return true;
 }
-
-bool withdraw_donated_memory(void) {}
 
 struct GameIconResult {
     uint8_t* data;

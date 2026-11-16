@@ -28,18 +28,41 @@ class GamesManager: ObservableObject {
     var finished: Bool = false
 
     private init() {}
+    
+    func loadGames() {
+        Task {
+            await loadGames()
+        }
+    }
 
-    func loadGames()  {
+    func loadGames() async {
         guard !finished else {
             return
         }
         
+        let manager = ROMFolderManager.shared
+        
+        var urls: [URL] = [.romsURL]
+        
+        for bookmark in manager.bookmarks {
+            guard let url = manager.getUrl(from: bookmark) else {
+                continue
+            }
+            
+            urls.append(url)
+        }
+        
         finished = true
         
-        if let enumerator = fileManager.enumerator(at: .romsURL, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator {
+        for folder in urls {
+            let wow = folder.startAccessingSecurityScopedResource()
+            
+            
+            for await fileURL in listFilesRecursively(in: folder) {
                 _ = CemuManager.load(path: fileURL.path)
             }
+            
+            if wow { folder.stopAccessingSecurityScopedResource() }
         }
         
         var count: Int32 = 0
@@ -73,6 +96,34 @@ class GamesManager: ObservableObject {
             
         } else {
             print("No games found.")
+        }
+    }
+    
+    
+    func listFilesRecursively(in directory: URL) -> AsyncStream<URL> {
+        AsyncStream { continuation in
+            Task.detached(priority: .utility) {
+                let keys: [URLResourceKey] = [.isRegularFileKey]
+                guard let enumerator = FileManager.default.enumerator(
+                    at: directory,
+                    includingPropertiesForKeys: keys,
+                    options: [.skipsHiddenFiles]
+                ) else {
+                    continuation.finish()
+                    return
+                }
+
+                while let fileURL = enumerator.nextObject() as? URL {
+                    if Task.isCancelled { break }
+                    
+                    if let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
+                       resourceValues.isRegularFile == true {
+                        continuation.yield(fileURL)
+                    }
+                }
+                
+                continuation.finish()
+            }
         }
     }
 

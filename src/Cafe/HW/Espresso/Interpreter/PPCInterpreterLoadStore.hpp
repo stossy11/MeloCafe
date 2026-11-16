@@ -48,12 +48,9 @@ static void PPCInterpreter_STWX(PPCInterpreter_t* hCPU, uint32 Opcode)
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-static void PPCInterpreter_STWCX(PPCInterpreter_t* hCPU, uint32 Opcode)
+template<bool AdvancePC>
+static void PPCInterpreter_storeConditional(PPCInterpreter_t* hCPU, uint32 ea, uint32 value)
 {
-	// http://www.ibm.com/developerworks/library/pa-atom/
-	sint32 rA, rS, rB;
-	PPC_OPC_TEMPL_X(Opcode, rS, rA, rB);
-	uint32 ea = (rA ? hCPU->gpr[rA] : 0) + hCPU->gpr[rB];
 	// check if we hold a reservation for the memory location
 
 	// todo - this isnt accurate. STWCX can succeed even with a different EA if the reserved value remained untouched
@@ -71,7 +68,7 @@ static void PPCInterpreter_STWCX(PPCInterpreter_t* hCPU, uint32 Opcode)
 		{
 			wordPtr = _rawPtrToAtomic((uint32be*)memory_getPointerFromVirtualOffset(ea));
 		}
-		uint32be newValue = hCPU->gpr[rS];
+		uint32be newValue = value;
 		if (!wordPtr->compare_exchange_strong(reservedValue, newValue))
 		{
 			// failed
@@ -92,7 +89,16 @@ static void PPCInterpreter_STWCX(PPCInterpreter_t* hCPU, uint32 Opcode)
 		// failed
 		ppc_setCRField(hCPU, 0, hCPU->xer_so);
 	}
-	PPCInterpreter_nextInstruction(hCPU);
+	if constexpr (AdvancePC)
+		PPCInterpreter_nextInstruction(hCPU);
+}
+
+static void PPCInterpreter_STWCX(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	sint32 rS, rA, rB;
+	PPC_OPC_TEMPL_X(opcode, rS, rA, rB);
+	const uint32 ea = (rA ? hCPU->gpr[rA] : 0) + hCPU->gpr[rB];
+	PPCInterpreter_storeConditional<true>(hCPU, ea, hCPU->gpr[rS]);
 }
 
 static void PPCInterpreter_STWUX(PPCInterpreter_t* hCPU, uint32 Opcode)

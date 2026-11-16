@@ -204,7 +204,9 @@ struct SettingsView: View {
         }
     }
 
+    @ObservedObject private var ramDonor = RamDonor.shared
     @AppStorage(RamDonor.enabledPreferenceKey) private var ramDonorsEnabled = true
+    @AppStorage(GuestSwap.enabledPreferenceKey) private var guestSwapEnabled = false
     @AppStorage("breakpoint") var stikDebugbreakpoint = false
 
     @AppStorage("showSwapButton") var showSwapButton: Bool = true
@@ -247,6 +249,7 @@ struct SettingsView: View {
             generalSection
             accountSection
             loadGameSection
+            eomsFolerGameSection
             memorialSection
         }
     }
@@ -284,12 +287,21 @@ struct SettingsView: View {
     }
 
     private var memorySection: some View {
-        Section {
-            Toggle("Use RAM Donors", isOn: $ramDonorsEnabled)
+        let donorsEnabled = ramDonorsEnabled && ramDonor.isAvailable
+        return Section {
+            Toggle("Swap", isOn: donorsEnabled ? .constant(false) : $guestSwapEnabled)
+                .disabled(donorsEnabled)
+            Toggle("Use RAM Donors", isOn: ramDonor.didFail ? .constant(false) : $ramDonorsEnabled)
+                .disabled(ramDonor.didFail)
         } header: {
             Text("Memory")
         } footer: {
-            Text("Use helper processes to supply guest RAM. Restart MeloCafe for changes to take effect.")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Swap uses 4 GiB of storage for guest memory when RAM donors are unavailable. Restart MeloCafe to apply memory settings.")
+                if ramDonor.didFail {
+                    Text("RAM donation failed after \(RamDonor.maxAttempts) attempts. Restart MeloCafe to try again.")
+                }
+            }
         }
     }
 
@@ -381,6 +393,19 @@ struct SettingsView: View {
             Text("Launch a title that isn't in your library.")
         }
     }
+    
+    private var eomsFolerGameSection: some View {
+        Section {
+            FolderListView()
+        } header: {
+            Text("External ROMs Folder")
+        } footer: {
+            Text("Add an External Folder for storing ROMs to show up in your library.")
+        }
+    }
+    
+    
+    // FolderListView
 
     private var memorialSection: some View {
         Section {
@@ -732,5 +757,49 @@ private struct ControllerRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+}
+
+struct FolderListView: View {
+    @StateObject private var folderManager = ROMFolderManager.shared
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(folderManager.bookmarks, id: \.self) { path in
+                HStack {
+                    Label(
+                        folderManager.getUrl(from: path)?.lastPathComponent ?? "Unknown",
+                        systemImage: "folder.fill"
+                    )
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    
+                    Spacer()
+                    
+                    Button(role: .destructive) {
+                        folderManager.bookmarks.removeAll(where: { $0 == path })
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            Button {
+                FileImporterManager.shared.importFiles(types: [.folder]) { result in
+                    if case .success(let paths) = result {
+                        for url in paths {
+                            let _ = folderManager.addFolder(url: url)
+                            GamesManager.shared.loadGames()
+                        }
+                    }
+                }
+            } label: {
+                Label("Add Folder", systemImage: "plus.circle.fill")
+            }
+            .padding(.vertical, 4)
+        }
     }
 }

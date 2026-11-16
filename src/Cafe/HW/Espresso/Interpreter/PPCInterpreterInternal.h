@@ -215,8 +215,17 @@ ATTR_MS_ABI double frsqrte_espresso(double input);
 
 void fcmpu_espresso(PPCInterpreter_t* hCPU, int crfD, double a, double b);
 
+void PPCInterpreter_truncateToInteger(PPCInterpreter_t* hCPU, uint32 frD, uint32 frB);
+void PPCInterpreter_roundToInteger(PPCInterpreter_t* hCPU, uint32 frD, uint32 frB);
+void PPCInterpreter_compareOrdered(PPCInterpreter_t* hCPU, uint32 crfD, uint32 frA, uint32 frB);
+void PPCInterpreter_comparePairedOrdered(PPCInterpreter_t* hCPU, uint32 crfD, uint32 frA, uint32 frB);
+void PPCInterpreter_writeFPSCR(PPCInterpreter_t* hCPU, uint32 frB, uint32 mask);
+void PPCInterpreter_moveXERToCR(PPCInterpreter_t* hCPU, uint32 cr);
+void PPCInterpreter_setFPSCRBit(PPCInterpreter_t* hCPU, uint32 bit);
+void PPCInterpreter_writeMSR(PPCInterpreter_t* hCPU, uint32 reg);
+
 // OPC
-void PPCInterpreter_virtualHLE(PPCInterpreter_t* hCPU, unsigned int opcode);
+void PPCInterpreter_executeHLE(PPCInterpreter_t* hCPU, uint32 hleFuncId);
 
 void PPCInterpreter_MFMSR(PPCInterpreter_t* hCPU, uint32 Opcode);
 void PPCInterpreter_MTMSR(PPCInterpreter_t* hCPU, uint32 Opcode);

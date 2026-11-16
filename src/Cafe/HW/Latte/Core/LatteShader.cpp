@@ -536,8 +536,9 @@ void LatteSHRC_UpdateVSBaseHash(uint8* vertexShaderPtr, uint32 vertexShaderSize,
 	{
 	    bool isRectVertexShader = (primitiveType == Latte::LATTE_VGT_PRIMITIVE_TYPE::E_PRIMITIVE_TYPE::RECTS);
 		const bool usesSSBOStreamout = g_renderer->UseTFViaSSBO() && LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0;
+		const bool fetchVertexManually = _activeFetchShader->NeedsManualFetchMtl(LatteGPUState.contextRegister);
 
-	    if (usesGeometryShader || isRectVertexShader || usesSSBOStreamout || _activeFetchShader->mtlFetchVertexManually)
+	    if (usesGeometryShader || isRectVertexShader || usesSSBOStreamout || fetchVertexManually)
 		{
       		for (sint32 g = 0; g < _activeFetchShader->bufferGroups.size(); g++)
             {
@@ -557,7 +558,7 @@ void LatteSHRC_UpdateVSBaseHash(uint8* vertexShaderPtr, uint32 vertexShaderSize,
       		    vsHash += 51ULL;
 
             // Vertex fetch
-			if (_activeFetchShader->mtlFetchVertexManually)
+			if (fetchVertexManually)
                 vsHash += 349ULL;
 		}
 	}

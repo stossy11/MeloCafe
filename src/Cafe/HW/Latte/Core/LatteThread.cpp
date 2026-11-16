@@ -14,6 +14,7 @@
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "util/helpers/helpers.h"
+#include "util/helpers/ThreadQoS.h"
 
 #include <imgui.h>
 #include "config/ActiveSettings.h"
@@ -26,6 +27,10 @@ std::atomic_bool sLatteThreadRunning = false;
 std::atomic_bool sLatteThreadFinishedInit = false;
 
 void LatteThread_Exit();
+
+#ifdef __APPLE__
+static thread_local ScopedThreadQoS sLatteThreadQoS(false);
+#endif
 
 void Latte_LoadInitialRegisters()
 {
@@ -116,6 +121,9 @@ void LatteThread_HandleOSScreen()
 int Latte_ThreadEntry()
 {
 	SetThreadName("LatteThread");
+#ifdef __APPLE__
+	sLatteThreadQoS.SetEnabled(true);
+#endif
 	sint32 w,h;
 	WindowSystem::GetWindowPhysSize(w,h);
 
@@ -268,6 +276,9 @@ void LatteThread_Exit()
 		delete renderer;
 		g_renderer.release();
 	}
+#ifdef __APPLE__
+	sLatteThreadQoS.SetEnabled(false);
+#endif
 	// reset GPU7 state
 	std::memset(&LatteGPUState, 0, sizeof(LatteGPUState));
 	#if BOOST_OS_WINDOWS

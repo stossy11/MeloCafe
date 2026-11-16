@@ -16,7 +16,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "1357"
             endingLineNumber = "1357"
-            landmarkName = "__OSFiberThreadEntry(_high, _low)"
+            landmarkName = "__OSFiberThreadEntry(_thread)"
             landmarkType = "9">
          </BreakpointContent>
       </BreakpointProxy>
@@ -67,6 +67,54 @@
             startingLineNumber = "2630"
             endingLineNumber = "2630"
             landmarkName = "FSAMount(client, source, target, flags, arg_buf, arg_len)"
+            landmarkType = "9">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "5D02DB63-12EA-4555-BFDF-8478AC274D9A"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "../src/util/MemMapper/MemMapperUnix.cpp"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "91"
+            endingLineNumber = "91"
+            landmarkName = "AllocateMemory(baseAddr, size, flags, fromReservation)"
+            landmarkType = "9">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "A1C2CA3B-D0AF-41F5-9A3D-2A92BF0EA721"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "../src/util/MemMapper/MemMapperUnix.cpp"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "102"
+            endingLineNumber = "102"
+            landmarkName = "AllocateMemory(baseAddr, size, flags, fromReservation)"
+            landmarkType = "9">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "19FE02A0-0AE2-4584-A175-5212E7EE1F1F"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "../src/util/MemMapper/MemMapperUnix.cpp"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "114"
+            endingLineNumber = "114"
+            landmarkName = "AllocateMemory(baseAddr, size, flags, fromReservation)"
             landmarkType = "9">
          </BreakpointContent>
       </BreakpointProxy>

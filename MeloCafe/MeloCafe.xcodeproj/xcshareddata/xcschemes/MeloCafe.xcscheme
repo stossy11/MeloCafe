@@ -27,8 +27,24 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldUseLaunchSchemeArgsEnv = "NO">
+      <Testables>
+         <TestableReference skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AD0C00000000000000000001"
+               BuildableName = "MeloCafeMemoryTests.xctest"
+               BlueprintName = "MeloCafeMemoryTests"
+               ReferencedContainer = "container:MeloCafe.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+      <CommandLineArguments>
+         <CommandLineArgument argument = "-ramDonorsEnabled" isEnabled = "YES"/>
+         <CommandLineArgument argument = "NO" isEnabled = "YES"/>
+         <CommandLineArgument argument = "-guestSwapEnabled" isEnabled = "YES"/>
+         <CommandLineArgument argument = "NO" isEnabled = "YES"/>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Release"

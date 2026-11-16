@@ -436,19 +436,11 @@ void PPCInterpreter_PS_RES(PPCInterpreter_t* hCPU, uint32 Opcode)
 
 // PS compare
 
-void PPCInterpreter_PS_CMPO0(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_comparePairedOrdered(PPCInterpreter_t* hCPU, uint32 crfD, uint32 frA, uint32 frB)
 {
-	FPUCheckAvailable();
-
-	sint32 crfD, frA, frB;
-	uint32 c=0;
-	frB = (Opcode>>11)&0x1F;
-	frA = (Opcode>>16)&0x1F;
-	crfD = (Opcode>>23)&0x7;
-
-
 	double a = hCPU->fpr[frA].fp0;
 	double b = hCPU->fpr[frB].fp0;
+	uint32 c;
 
 	if(IS_NAN(*(uint64*)&a) || IS_NAN(*(uint64*)&b))
 	{
@@ -469,7 +461,14 @@ void PPCInterpreter_PS_CMPO0(PPCInterpreter_t* hCPU, uint32 Opcode)
 	ppc_setCRField(hCPU, crfD, c);
 
 	hCPU->fpscr = (hCPU->fpscr & 0xffff0fff) | (c << 12);
-	
+}
+
+void PPCInterpreter_PS_CMPO0(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 crfD = (opcode >> 23) & 7;
+	const uint32 frA = (opcode >> 16) & 31;
+	const uint32 frB = (opcode >> 11) & 31;
+	PPCInterpreter_comparePairedOrdered(hCPU, crfD, frA, frB);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 

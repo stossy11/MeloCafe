@@ -131,6 +131,7 @@ class VulkanRenderer : public Renderer
 {
 	friend class LatteQueryObjectVk;
 	friend class LatteTextureReadbackInfoVk;
+	friend class VKRDestructibleObject;
 	friend class PipelineCompiler;
 
 	using VSync = SwapchainInfoVk::VSync;
@@ -249,6 +250,8 @@ public:
 
 	// command buffer synchronization
 	uint64 GetCurrentCommandBufferId() const;
+
+	// Immediate status check for the GPU thread.
 	bool HasCommandBufferFinished(uint64 commandBufferId) const;
 	void WaitCommandBufferFinished(uint64 commandBufferId);
 
@@ -661,8 +664,15 @@ private:
 		return m_commandBufferSemaphores[(m_commandBufferIndex + m_commandBufferSemaphores.size() - 1) % m_commandBufferSemaphores.size()];
 	}
 
-	uint64 m_numSubmittedCmdBuffers{};
+	uint64 m_numSubmittedCmdBuffers{}; // jobs queued to the render worker
+	std::atomic<uint64> m_numQueueSubmissions{}; // successful vkQueueSubmit calls
 	uint64 m_countCommandBufferFinished{};
+
+	bool HasRetiredCommandBuffer(uint64 commandBufferId) const
+	{
+		return commandBufferId < m_countCommandBufferFinished;
+	}
+	bool IsFenceSignaled(VkFence fence) const;
 
 	uint32 m_recordedDrawcalls{}; // number of drawcalls recorded into current command buffer
 	uint32 m_submitThreshold{}; // submit current buffer if recordedDrawcalls exceeds this number

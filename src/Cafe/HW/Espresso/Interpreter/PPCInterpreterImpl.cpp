@@ -12,6 +12,8 @@
 #include "Cafe/HW/MMU/MMU.h"
 #include "Cafe/HW/Espresso/Debugger/Debugger.h"
 #include "Cafe/HW/Espresso/Debugger/GDBStub.h"
+#include "Cafe/OS/libs/coreinit/coreinit_CodeGen.h"
+#include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 
 class PPCItpCafeOSUsermode
 {
@@ -498,14 +500,6 @@ struct PPCBlockEntry
 };
 static_assert(sizeof(PPCBlockEntry) == 16);
 
-// a classic handler plus its threaded block handler, which calls it directly so it can be inlined
-struct PPCLegacyOp
-{
-    PPCBlockHandler legacy;
-    PPCBlockFn direct;
-    PPCBlockFn terminator;
-};
-
 using PPCBlockDesc = uint64;
 
 // the table and the pool start small and double when they fill up, the cache is only thrown away once both are at their maximum
@@ -555,11 +549,9 @@ struct PPCBlockCtx
     PPCBlockSlot* table;
     PPCBlockEntry* pool;
     PPCBlockSlot* slot;
-    const PPCBlockEntry* firstEntry;
-    uint32 blockStart;
-    uint32 blockCount;
+    uint32 blockFallthrough;
     uint32 generation;
-    uint32 (*targetSlots)[2];
+    struct PPCBlockThreadState* threadState;
     uint32 idleSpins;
     uint32 idleSkipAddr;
     bool genericExit; // the last block ended on the classic path, which released the cache
@@ -939,15 +931,19 @@ static PPCBlockSlot* PPCBlockCache_lookup(uint32 addr)
     return nullptr;
 }
 
-static FORCE_INLINE PPCBlockSlot* PPCBlockCache_targetLookup(PPCBlockSlot* table, uint32 (*targets)[2], uint32 ip)
+static FORCE_INLINE PPCBlockSlot* PPCBlockCache_targetLookup(PPCBlockSlot* table, uint32 (*targets)[2], uint32 ip, PPCBlockDesc& desc)
 {
     const uint32 key = PPCBlockDesc_keyForAddr(ip);
     const uint32 set = ((ip >> 2) ^ (ip >> 9)) & 31;
     for (uint32 way = 0; way < 2; way++)
     {
         PPCBlockSlot* slot = table + targets[set][way];
-        if (PPCBlockDesc_key(slot->desc.load(std::memory_order_acquire)) == key)
+        const PPCBlockDesc candidate = slot->desc.load(std::memory_order_acquire);
+        if (PPCBlockDesc_key(candidate) == key)
+        {
+            desc = candidate;
             return slot;
+        }
     }
     return nullptr;
 }
@@ -1050,132 +1046,132 @@ public:
 #include "PPCInterpreterLoadStore.hpp"
 #include "PPCInterpreterALU.hpp"
     
-    static constexpr std::array<PPCLegacyOp, 1024> makeHandlerTable19()
+    static constexpr std::array<PPCBlockHandler, 1024> makeHandlerTable19()
     {
-        std::array<PPCLegacyOp, 1024> result{};
-        result[0] = legacyOp<PPCInterpreter_MCRF>();
-        result[16] = legacyOp<PPCInterpreter_BCLRX>();
-        result[33] = legacyOp<PPCInterpreter_CRNOR>();
-        result[50] = legacyOp<PPCInterpreter_RFI>();
-        result[129] = legacyOp<PPCInterpreter_CRANDC>();
-        result[150] = legacyOp<PPCInterpreter_ISYNC>();
-        result[193] = legacyOp<PPCInterpreter_CRXOR>();
-        result[225] = legacyOp<PPCInterpreter_CRNAND>();
-        result[257] = legacyOp<PPCInterpreter_CRAND>();
-        result[289] = legacyOp<PPCInterpreter_CREQV>();
-        result[417] = legacyOp<PPCInterpreter_CRORC>();
-        result[449] = legacyOp<PPCInterpreter_CROR>();
-        result[528] = legacyOp<PPCInterpreter_BCCTR>();
+        std::array<PPCBlockHandler, 1024> result{};
+        result[0] = PPCInterpreter_MCRF;
+        result[16] = PPCInterpreter_BCLRX;
+        result[33] = PPCInterpreter_CRNOR;
+        result[50] = PPCInterpreter_RFI;
+        result[129] = PPCInterpreter_CRANDC;
+        result[150] = PPCInterpreter_ISYNC;
+        result[193] = PPCInterpreter_CRXOR;
+        result[225] = PPCInterpreter_CRNAND;
+        result[257] = PPCInterpreter_CRAND;
+        result[289] = PPCInterpreter_CREQV;
+        result[417] = PPCInterpreter_CRORC;
+        result[449] = PPCInterpreter_CROR;
+        result[528] = PPCInterpreter_BCCTR;
         return result;
     }
     
     
-    static constexpr std::array<PPCLegacyOp, 1024> makeHandlerTable31()
+    static constexpr std::array<PPCBlockHandler, 1024> makeHandlerTable31()
     {
-        std::array<PPCLegacyOp, 1024> result{};
-        result[0] = legacyOp<PPCInterpreter_CMP>();
-        result[4] = legacyOp<PPCInterpreter_TW>();
-        result[8] = legacyOp<PPCInterpreter_SUBFC>();
-        result[10] = legacyOp<PPCInterpreter_ADDC>();
-        result[11] = legacyOp<PPCInterpreter_MULHWU_>();
-        result[19] = legacyOp<PPCInterpreter_MFCR>();
-        result[20] = legacyOp<PPCInterpreter_LWARX>();
-        result[23] = legacyOp<PPCInterpreter_LWZX>();
-        result[24] = legacyOp<PPCInterpreter_SLWX>();
-        result[26] = legacyOp<PPCInterpreter_CNTLZW>();
-        result[28] = legacyOp<PPCInterpreter_ANDX>();
-        result[32] = legacyOp<PPCInterpreter_CMPL>();
-        result[40] = legacyOp<PPCInterpreter_SUBF>();
-        result[54] = legacyOp<PPCInterpreter_DCBST>();
-        result[55] = legacyOp<PPCInterpreter_LWZXU>();
-        result[60] = legacyOp<PPCInterpreter_ANDCX>();
-        result[75] = legacyOp<PPCInterpreter_MULHW_>();
-        result[83] = legacyOp<PPCInterpreter_MFMSR>();
-        result[86] = legacyOp<PPCInterpreter_DCBF>();
-        result[87] = legacyOp<PPCInterpreter_LBZX>();
-        result[104] = legacyOp<PPCInterpreter_NEG>();
-        result[119] = legacyOp<PPCInterpreter_LBZXU>(); // Sonic Lost World
-        result[124] = legacyOp<PPCInterpreter_NORX>();
-        result[136] = legacyOp<PPCInterpreter_SUBFE>();
-        result[138] = legacyOp<PPCInterpreter_ADDE>();
-        result[144] = legacyOp<PPCInterpreter_MTCRF>();
-        result[146] = legacyOp<PPCInterpreter_MTMSR>();
-        result[150] = legacyOp<PPCInterpreter_STWCX>();
-        result[151] = legacyOp<PPCInterpreter_STWX>();
-        result[183] = legacyOp<PPCInterpreter_STWUX>();
-        result[200] = legacyOp<PPCInterpreter_SUBFZE>();
-        result[202] = legacyOp<PPCInterpreter_ADDZE>();
-        result[210] = legacyOp<PPCInterpreter_MTSR>();
-        result[215] = legacyOp<PPCInterpreter_STBX>();
-        result[232] = legacyOp<PPCInterpreter_SUBFME>(); // Trine 2
-        result[234] = legacyOp<PPCInterpreter_ADDME>();
-        result[235] = legacyOp<PPCInterpreter_MULLW>();
-        result[247] = legacyOp<PPCInterpreter_STBUX>();
-        result[266] = legacyOp<PPCInterpreter_ADD>();
-        result[278] = legacyOp<PPCInterpreter_DCBT>();
-        result[279] = legacyOp<PPCInterpreter_LHZX>();
-        result[284] = legacyOp<PPCInterpreter_EQV>();
-        result[306] = legacyOp<PPCInterpreter_TLBIE>();
-        result[311] = legacyOp<PPCInterpreter_LHZUX>(); // Wii U Menu v177 (US)
-        result[316] = legacyOp<PPCInterpreter_XOR>();
-        result[339] = legacyOp<PPCInterpreter_MFSPR>();
-        result[343] = legacyOp<PPCInterpreter_LHAX>();
-        result[371] = legacyOp<PPCInterpreter_MFTB>();
-        result[375] = legacyOp<PPCInterpreter_LHAUX>(); // Wii U Menu v177 (US)
-        result[407] = legacyOp<PPCInterpreter_STHX>();
-        result[412] = legacyOp<PPCInterpreter_ORC>();
-        result[439] = legacyOp<PPCInterpreter_STHUX>();
-        result[444] = legacyOp<PPCInterpreter_OR>();
-        result[459] = legacyOp<PPCInterpreter_DIVWU>();
-        result[467] = legacyOp<PPCInterpreter_MTSPR>();
-        result[470] = legacyOp<PPCInterpreter_DCBI>();
-        result[476] = legacyOp<PPCInterpreter_NANDX>();
-        result[491] = legacyOp<PPCInterpreter_DIVW>();
-        result[512] = legacyOp<PPCInterpreter_MCRXR>();
-        result[520] = legacyOp<PPCInterpreter_SUBFCO>(); // Affordable Space Adventures + other Unity games
-        result[522] = legacyOp<PPCInterpreter_ADDCO>();
-        result[523] = legacyOp<PPCInterpreter_MULHWU_>(); // 11 | OE; OE is ignored
-        result[533] = legacyOp<PPCInterpreter_LSWX>();
-        result[534] = legacyOp<PPCInterpreter_LWBRX>();
-        result[535] = legacyOp<PPCInterpreter_LFSX>();
-        result[536] = legacyOp<PPCInterpreter_SRWX>();
-        result[552] = legacyOp<PPCInterpreter_SUBFO>();
-        result[566] = legacyOp<PPCInterpreter_TLBSYNC>();
-        result[567] = legacyOp<PPCInterpreter_LFSUX>();
-        result[587] = legacyOp<PPCInterpreter_MULHW_>(); // 75 | OE; OE is ignored for MULHW
-        result[595] = legacyOp<PPCInterpreter_MFSR>();
-        result[597] = legacyOp<PPCInterpreter_LSWI>();
-        result[598] = legacyOp<PPCInterpreter_SYNC>();
-        result[599] = legacyOp<PPCInterpreter_LFDX>();
-        result[616] = legacyOp<PPCInterpreter_NEGO>();
-        result[631] = legacyOp<PPCInterpreter_LFDUX>();
-        result[648] = legacyOp<PPCInterpreter_SUBFEO>(); // 136 | OE
-        result[650] = legacyOp<PPCInterpreter_ADDEO>(); // 138 | OE
-        result[662] = legacyOp<PPCInterpreter_STWBRX>();
-        result[663] = legacyOp<PPCInterpreter_STFSX>();
-        result[661] = legacyOp<PPCInterpreter_STSWX>();
-        result[695] = legacyOp<PPCInterpreter_STFSUX>();
-        result[712] = legacyOp<PPCInterpreter_SUBFZEO>(); // 200 | OE
-        result[714] = legacyOp<PPCInterpreter_ADDZEO>(); // 202 | OE
-        result[725] = legacyOp<PPCInterpreter_STSWI>();
-        result[727] = legacyOp<PPCInterpreter_STFDX>();
-        result[744] = legacyOp<PPCInterpreter_SUBFMEO>(); // 232 | OE
-        result[746] = legacyOp<PPCInterpreter_ADDMEO>(); // 234 | OE
-        result[747] = legacyOp<PPCInterpreter_MULLWO>();
-        result[759] = legacyOp<PPCInterpreter_STFDUX>();
-        result[778] = legacyOp<PPCInterpreter_ADDO>();
-        result[790] = legacyOp<PPCInterpreter_LHBRX>();
-        result[792] = legacyOp<PPCInterpreter_SRAW>();
-        result[824] = legacyOp<PPCInterpreter_SRAWI>();
-        result[854] = legacyOp<PPCInterpreter_EIEIO>();
-        result[918] = legacyOp<PPCInterpreter_STHBRX>();
-        result[922] = legacyOp<PPCInterpreter_EXTSH>();
-        result[954] = legacyOp<PPCInterpreter_EXTSB>();
-        result[971] = legacyOp<PPCInterpreter_DIVWUO>();
-        result[982] = legacyOp<PPCInterpreter_ICBI>();
-        result[983] = legacyOp<PPCInterpreter_STFIWX>();
-        result[1003] = legacyOp<PPCInterpreter_DIVWO>();
-        result[1014] = legacyOp<PPCInterpreter_DCBZ>();
+        std::array<PPCBlockHandler, 1024> result{};
+        result[0] = PPCInterpreter_CMP;
+        result[4] = PPCInterpreter_TW;
+        result[8] = PPCInterpreter_SUBFC;
+        result[10] = PPCInterpreter_ADDC;
+        result[11] = PPCInterpreter_MULHWU_;
+        result[19] = PPCInterpreter_MFCR;
+        result[20] = PPCInterpreter_LWARX;
+        result[23] = PPCInterpreter_LWZX;
+        result[24] = PPCInterpreter_SLWX;
+        result[26] = PPCInterpreter_CNTLZW;
+        result[28] = PPCInterpreter_ANDX;
+        result[32] = PPCInterpreter_CMPL;
+        result[40] = PPCInterpreter_SUBF;
+        result[54] = PPCInterpreter_DCBST;
+        result[55] = PPCInterpreter_LWZXU;
+        result[60] = PPCInterpreter_ANDCX;
+        result[75] = PPCInterpreter_MULHW_;
+        result[83] = PPCInterpreter_MFMSR;
+        result[86] = PPCInterpreter_DCBF;
+        result[87] = PPCInterpreter_LBZX;
+        result[104] = PPCInterpreter_NEG;
+        result[119] = PPCInterpreter_LBZXU; // Sonic Lost World
+        result[124] = PPCInterpreter_NORX;
+        result[136] = PPCInterpreter_SUBFE;
+        result[138] = PPCInterpreter_ADDE;
+        result[144] = PPCInterpreter_MTCRF;
+        result[146] = PPCInterpreter_MTMSR;
+        result[150] = PPCInterpreter_STWCX;
+        result[151] = PPCInterpreter_STWX;
+        result[183] = PPCInterpreter_STWUX;
+        result[200] = PPCInterpreter_SUBFZE;
+        result[202] = PPCInterpreter_ADDZE;
+        result[210] = PPCInterpreter_MTSR;
+        result[215] = PPCInterpreter_STBX;
+        result[232] = PPCInterpreter_SUBFME; // Trine 2
+        result[234] = PPCInterpreter_ADDME;
+        result[235] = PPCInterpreter_MULLW;
+        result[247] = PPCInterpreter_STBUX;
+        result[266] = PPCInterpreter_ADD;
+        result[278] = PPCInterpreter_DCBT;
+        result[279] = PPCInterpreter_LHZX;
+        result[284] = PPCInterpreter_EQV;
+        result[306] = PPCInterpreter_TLBIE;
+        result[311] = PPCInterpreter_LHZUX; // Wii U Menu v177 (US)
+        result[316] = PPCInterpreter_XOR;
+        result[339] = PPCInterpreter_MFSPR;
+        result[343] = PPCInterpreter_LHAX;
+        result[371] = PPCInterpreter_MFTB;
+        result[375] = PPCInterpreter_LHAUX; // Wii U Menu v177 (US)
+        result[407] = PPCInterpreter_STHX;
+        result[412] = PPCInterpreter_ORC;
+        result[439] = PPCInterpreter_STHUX;
+        result[444] = PPCInterpreter_OR;
+        result[459] = PPCInterpreter_DIVWU;
+        result[467] = PPCInterpreter_MTSPR;
+        result[470] = PPCInterpreter_DCBI;
+        result[476] = PPCInterpreter_NANDX;
+        result[491] = PPCInterpreter_DIVW;
+        result[512] = PPCInterpreter_MCRXR;
+        result[520] = PPCInterpreter_SUBFCO; // Affordable Space Adventures + other Unity games
+        result[522] = PPCInterpreter_ADDCO;
+        result[523] = PPCInterpreter_MULHWU_; // 11 | OE; OE is ignored
+        result[533] = PPCInterpreter_LSWX;
+        result[534] = PPCInterpreter_LWBRX;
+        result[535] = PPCInterpreter_LFSX;
+        result[536] = PPCInterpreter_SRWX;
+        result[552] = PPCInterpreter_SUBFO;
+        result[566] = PPCInterpreter_TLBSYNC;
+        result[567] = PPCInterpreter_LFSUX;
+        result[587] = PPCInterpreter_MULHW_; // 75 | OE; OE is ignored for MULHW
+        result[595] = PPCInterpreter_MFSR;
+        result[597] = PPCInterpreter_LSWI;
+        result[598] = PPCInterpreter_SYNC;
+        result[599] = PPCInterpreter_LFDX;
+        result[616] = PPCInterpreter_NEGO;
+        result[631] = PPCInterpreter_LFDUX;
+        result[648] = PPCInterpreter_SUBFEO; // 136 | OE
+        result[650] = PPCInterpreter_ADDEO; // 138 | OE
+        result[662] = PPCInterpreter_STWBRX;
+        result[663] = PPCInterpreter_STFSX;
+        result[661] = PPCInterpreter_STSWX;
+        result[695] = PPCInterpreter_STFSUX;
+        result[712] = PPCInterpreter_SUBFZEO; // 200 | OE
+        result[714] = PPCInterpreter_ADDZEO; // 202 | OE
+        result[725] = PPCInterpreter_STSWI;
+        result[727] = PPCInterpreter_STFDX;
+        result[744] = PPCInterpreter_SUBFMEO; // 232 | OE
+        result[746] = PPCInterpreter_ADDMEO; // 234 | OE
+        result[747] = PPCInterpreter_MULLWO;
+        result[759] = PPCInterpreter_STFDUX;
+        result[778] = PPCInterpreter_ADDO;
+        result[790] = PPCInterpreter_LHBRX;
+        result[792] = PPCInterpreter_SRAW;
+        result[824] = PPCInterpreter_SRAWI;
+        result[854] = PPCInterpreter_EIEIO;
+        result[918] = PPCInterpreter_STHBRX;
+        result[922] = PPCInterpreter_EXTSH;
+        result[954] = PPCInterpreter_EXTSB;
+        result[971] = PPCInterpreter_DIVWUO;
+        result[982] = PPCInterpreter_ICBI;
+        result[983] = PPCInterpreter_STFIWX;
+        result[1003] = PPCInterpreter_DIVWO;
+        result[1014] = PPCInterpreter_DCBZ;
         return result;
     }
 
@@ -1218,19 +1214,13 @@ public:
         switch ((opcode >> 26))
         {
         PPC_PRIMARY_CASE(0)
-            debug_printf("ZERO[NOP] | 0x%08X\n", (unsigned int)hCPU->instructionPointer);
-    #ifdef CEMU_DEBUG_ASSERT
-            assert_dbg();
-            while (true) std::this_thread::sleep_for(std::chrono::seconds(1));
-    #endif
-            hCPU->instructionPointer += 4;
+            blockZero(hCPU, opcode);
             PPC_DISPATCH_NEXT();
         PPC_PRIMARY_CASE(1) // virtual HLE
-            PPCInterpreter_virtualHLE(hCPU, opcode);
+            PPCInterpreter_executeHLE(hCPU, opcode & 0xFFFF);
             PPC_DISPATCH_NEXT();
         PPC_PRIMARY_CASE(3)
-            cemuLog_logDebug(LogType::Force, "Unsupported TWI instruction executed at {:08x}", hCPU->instructionPointer);
-            PPCInterpreter_nextInstruction(hCPU);
+            blockTWI(hCPU, opcode);
             PPC_DISPATCH_NEXT();
         PPC_PRIMARY_CASE(4)
             switch (PPC_getBits(opcode, 30, 5))
@@ -1410,7 +1400,7 @@ public:
         PPC_PRIMARY_CASE(19) // opcode category
             {
                 static constexpr auto handlers = makeHandlerTable19();
-                if (auto handler = handlers[PPC_getBits(opcode, 30, 10)].legacy)
+                if (auto handler = handlers[PPC_getBits(opcode, 30, 10)])
                     handler(hCPU, opcode);
                 else
                 {
@@ -1450,7 +1440,7 @@ public:
         PPC_PRIMARY_CASE(31) // opcode category
             {
                 static constexpr auto handlers = makeHandlerTable31();
-                if (auto handler = handlers[PPC_getBits(opcode, 30, 10)].legacy)
+                if (auto handler = handlers[PPC_getBits(opcode, 30, 10)])
                     handler(hCPU, opcode);
                 else
                 {
@@ -1675,46 +1665,58 @@ public:
     }
     
     
+    static void blockZero(PPCInterpreter_t* hCPU, uint32)
+    {
+        debug_printf("ZERO[NOP] | 0x%08X\n", (unsigned int)hCPU->instructionPointer);
+#ifdef CEMU_DEBUG_ASSERT
+        assert_dbg();
+        while (true)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+#endif
+        PPCInterpreter_nextInstruction(hCPU);
+    }
+
+    static void blockTWI(PPCInterpreter_t* hCPU, uint32)
+    {
+        cemuLog_logDebug(LogType::Force, "Unsupported TWI instruction executed at {:08x}", hCPU->instructionPointer);
+        PPCInterpreter_nextInstruction(hCPU);
+    }
+
     static void blockFallbackStep(PPCInterpreter_t* hCPU, uint32 /*opcode*/)
     {
         executeInstruction<false>(hCPU);
     }
 
-    static void blockICBI(PPCInterpreter_t* hCPU, uint32 opcode)
+    static void blockICBI(PPCInterpreter_t* hCPU, uint32 address)
     {
-        PPCInterpreter_ICBI(hCPU, opcode);
-        sint32 rD, rA, rB;
-        PPC_OPC_TEMPL_X(opcode, rD, rA, rB);
-        const uint32 ea = (rA ? hCPU->gpr[rA] : 0) + hCPU->gpr[rB];
-        PPCInterpreter_invalidateBlockCacheRange(ea & ~31u, 32);
+        const uint32 line = address & ~31u;
+        coreinit::codeGenHandleICBI(line);
+        PPCInterpreter_nextInstruction(hCPU);
+        PPCInterpreter_invalidateBlockCacheRange(line, 32);
     }
 
-    // threaded block handlers :3
+    // Threaded block handlers
 #if PPC_BLOCK_MUSTTAIL
 #define PPC_BLOCK_RET void
 #define PPC_BLOCK_ADVANCE(n) do { const PPCBlockEntry* next_ = e + (n); [[clang::musttail]] return next_->fn(hCPU, next_, mem, ctx, cachedSP); } while (false)
 #define PPC_BLOCK_EXIT() do { blkFlushSP(hCPU, cachedSP); return; } while (false)
-// ends a block that left instructionPointer at ip, continuing straight into the next block when chainNext allows it
-#define PPC_BLOCK_CHAIN(ip, fallthrough) do { \
-    if (const PPCBlockEntry* next_ = chainNext(hCPU, ctx, (ip), (fallthrough))) \
+// Publish the guest PC at dispatcher exits and before handlers that observe it.
+#define PPC_BLOCK_CHAIN(ip) do { \
+    const uint32 target_ = (ip); \
+    if (const PPCBlockEntry* next_ = chainNext(hCPU, ctx, target_)) \
         [[clang::musttail]] return next_->fn(hCPU, next_, mem, ctx, cachedSP); \
-    blkFlushSP(hCPU, cachedSP); \
-    return; \
+    hCPU->instructionPointer = target_; \
+    PPC_BLOCK_EXIT(); \
 } while (false)
 #else
 #define PPC_BLOCK_RET const PPCBlockEntry*
 #define PPC_BLOCK_ADVANCE(n) return e + (n)
 #define PPC_BLOCK_EXIT() return nullptr
 // without guaranteed tail calls chaining would grow the stack, every block goes back to the dispatcher
-#define PPC_BLOCK_CHAIN(ip, fallthrough) return nullptr
+#define PPC_BLOCK_CHAIN(ip) do { hCPU->instructionPointer = (ip); PPC_BLOCK_EXIT(); } while (false)
 #endif
 #define PPC_BLOCK_NEXT() PPC_BLOCK_ADVANCE(1)
 #define PPC_BLOCK_OP(name) static PPC_BLOCK_RET PPC_BLOCK_CC name(PPCInterpreter_t* hCPU, const PPCBlockEntry* e, uint8* mem, [[maybe_unused]] PPCBlockCtx* ctx, [[maybe_unused]] uint32 cachedSP)
-
-    static FORCE_INLINE uint32 blkAddr(const PPCBlockEntry* e, const PPCBlockCtx* ctx)
-    {
-        return ctx->blockStart + uint32(e - ctx->firstEntry) * 4;
-    }
 
     static FORCE_INLINE uint32 blkGetGpr(PPCInterpreter_t* hCPU, uint32 reg, uint32 cachedSP)
     {
@@ -1790,54 +1792,51 @@ public:
         ppc_setCRField(hCPU, field, value);
     }
     
-    template<PPCBlockHandler H>
-    PPC_BLOCK_OP(blkCall)
+    // Host calls and debugger traps can re-enter the interpreter or change its cache.
+    template<PPCBlockHandler H, bool indexedAddress = false>
+    PPC_BLOCK_OP(blkGenericTerm)
     {
-        hCPU->instructionPointer = blkAddr(e, ctx);
+        const uint32 ip = ctx->blockFallthrough - 4;
+        const uint32 operand = indexedAddress
+            ? (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP)
+            : e->imm;
+        hCPU->instructionPointer = ip;
+        blkFlushSP(hCPU, cachedSP);
+
+        ctx->genericExit = true;
+        ctx->threadState->ack.store(0, std::memory_order_release);
+        H(hCPU, operand);
+        cachedSP = hCPU->gpr[1];
+
+#if PPC_BLOCK_MUSTTAIL
+        if (hCPU->remainingCycles > 0)
+        {
+            // Pin the original generation before touching any cached pointers again.
+            std::unique_lock<std::mutex> lock(s_blockCacheMutex, std::try_to_lock);
+            if (lock.owns_lock() && s_blockCacheGeneration.load(std::memory_order_relaxed) == ctx->generation)
+            {
+                ctx->threadState->ack.store(ctx->generation, std::memory_order_release);
+                ctx->genericExit = false;
+            }
+        }
+        if (!ctx->genericExit)
+            PPC_BLOCK_CHAIN(hCPU->instructionPointer);
+#endif
+        PPC_BLOCK_EXIT();
+    }
+
+    template<PPCBlockHandler H>
+    PPC_BLOCK_OP(blkLocalTerm)
+    {
+        const uint32 ip = ctx->blockFallthrough - 4;
+        hCPU->instructionPointer = ip;
         blkFlushSP(hCPU, cachedSP);
         H(hCPU, e->imm);
         cachedSP = hCPU->gpr[1];
-        PPC_BLOCK_NEXT();
+        PPC_BLOCK_CHAIN(hCPU->instructionPointer);
     }
 
-    template<PPCBlockHandler H>
-    static constexpr PPCLegacyOp legacyOp()
-    {
-        return { H, blkCall<H>, blkGenericTerm<H> };
-    }
-    
-    template<PPCBlockHandler H>
-    PPC_BLOCK_OP(blkGenericTerm)
-    {
-        hCPU->instructionPointer = blkAddr(e, ctx);
-        const uint32 opcode = e->imm;
-        blkFlushSP(hCPU, cachedSP);
-        const uint32 fallthrough = blkAddr(e, ctx) + 4;
-        
-        ctx->genericExit = true;
-        if (PPCBlockThreadState* ts = t_blockThreadState)
-            ts->ack.store(0, std::memory_order_release);
-        
-        H(hCPU, opcode);
-        cachedSP = hCPU->gpr[1];
-
-        if (hCPU->remainingCycles <= 0)
-            PPC_BLOCK_EXIT();
-        PPCBlockThreadState* ts = t_blockThreadState;
-        if (!ts)
-            PPC_BLOCK_EXIT();
-        {
-            // The handler may yield or resize the cache. Pin it again before using any old pointers.
-            std::unique_lock<std::mutex> lock(s_blockCacheMutex, std::try_to_lock);
-            if (!lock.owns_lock() || s_blockCacheGeneration.load(std::memory_order_relaxed) != ctx->generation)
-                PPC_BLOCK_EXIT();
-            ts->ack.store(ctx->generation, std::memory_order_release);
-        }
-        ctx->genericExit = false;
-        PPC_BLOCK_CHAIN((uint32)hCPU->instructionPointer, fallthrough);
-    }
-
-    static FORCE_INLINE const PPCBlockEntry* chainNext(PPCInterpreter_t* hCPU, PPCBlockCtx* ctx, uint32 ip, uint32 fallthrough)
+    static FORCE_INLINE const PPCBlockEntry* chainNext(PPCInterpreter_t* hCPU, PPCBlockCtx* ctx, uint32 ip)
     {
         if (hCPU->remainingCycles <= 0) [[unlikely]]
             return nullptr;
@@ -1845,26 +1844,23 @@ public:
             return nullptr;
         // Match the dispatcher's link placement, including branches to their own fallthrough.
         const PPCBlockSlot* cur = ctx->slot;
-        const uint32 link = ip == fallthrough ? PPCBLOCK_LINK_FALLTHROUGH : PPCBLOCK_LINK_TAKEN;
+        const uint32 link = ip == ctx->blockFallthrough ? PPCBLOCK_LINK_FALLTHROUGH : PPCBLOCK_LINK_TAKEN;
         PPCBlockSlot* slot = ctx->table + cur->nextSlot[link].load(std::memory_order_relaxed);
         PPCBlockDesc desc = slot->desc.load(std::memory_order_acquire);
         const uint32 key = PPCBlockDesc_keyForAddr(ip);
         if (PPCBlockDesc_key(desc) != key)
         {
-            slot = PPCBlockCache_targetLookup(ctx->table, ctx->targetSlots, ip);
+            slot = PPCBlockCache_targetLookup(ctx->table, ctx->threadState->targetSlots, ip, desc);
             if (!slot)
                 return nullptr;
-            desc = slot->desc.load(std::memory_order_acquire);
         }
         PPCBlockEntry* header = PPCBlockDesc_header(ctx->pool, desc);
         if (PPCBlockHeader_verifiedEpoch(header).load(std::memory_order_relaxed) != s_codeEpoch.load(std::memory_order_relaxed)) [[unlikely]]
             return nullptr;
         const uint32 count = PPCBlockDesc_count(desc);
         hCPU->remainingCycles -= (sint32)count;
-        ctx->firstEntry = ctx->pool + PPCBlockDesc_firstEntry(desc);
         ctx->slot = slot;
-        ctx->blockStart = ip;
-        ctx->blockCount = count;
+        ctx->blockFallthrough = ip + count * 4;
         return ctx->pool + PPCBlockDesc_firstEntry(desc);
     }
 
@@ -1885,20 +1881,16 @@ public:
 
     PPC_BLOCK_OP(blkEnd)
     {
-        const uint32 ip = blkAddr(e, ctx);
-        hCPU->instructionPointer = ip;
-        PPC_BLOCK_CHAIN(ip, ip);
+        PPC_BLOCK_CHAIN(ctx->blockFallthrough);
     }
 
     PPC_BLOCK_OP(blkBX)
     {
         if (e->x)
-            hCPU->spr.LR = blkAddr(e, ctx) + 4;
-        const uint32 ip = e->imm;
-        hCPU->instructionPointer = ip;
+            hCPU->spr.LR = ctx->blockFallthrough;
         if (e->b & PPCBLOCK_BRANCH_IDLE)
-            idleLoopBackEdge(hCPU, ctx, blkAddr(e, ctx));
-        PPC_BLOCK_CHAIN(ip, blkAddr(e, ctx) + 4);
+            idleLoopBackEdge(hCPU, ctx, ctx->blockFallthrough - 4);
+        PPC_BLOCK_CHAIN(e->imm);
     }
     
     static FORCE_INLINE bool blkBranchCondition(PPCInterpreter_t* hCPU, uint32 BO, uint32 BI)
@@ -1917,25 +1909,33 @@ public:
         if (taken)
         {
             if (e->x)
-                hCPU->spr.LR = blkAddr(e, ctx) + 4;
+                hCPU->spr.LR = ctx->blockFallthrough;
             ip = e->imm;
             if (e->b & PPCBLOCK_BRANCH_IDLE)
-                idleLoopBackEdge(hCPU, ctx, blkAddr(e, ctx));
+                idleLoopBackEdge(hCPU, ctx, ctx->blockFallthrough - 4);
         }
         else
         {
-            ip = blkAddr(e, ctx) + 4;
+            ip = ctx->blockFallthrough;
             if (e->b & PPCBLOCK_BRANCH_IDLE)
                 ctx->idleSpins = 0;
         }
-        hCPU->instructionPointer = ip;
         return ip;
     }
 
     PPC_BLOCK_OP(blkBCX)
     {
         const uint32 ip = blkTakeBranch(hCPU, e, ctx, blkBranchCondition(hCPU, e->d, e->a));
-        PPC_BLOCK_CHAIN(ip, blkAddr(e, ctx) + 4);
+        PPC_BLOCK_CHAIN(ip);
+    }
+
+    PPC_BLOCK_OP(blkBCXAbsolute)
+    {
+        const bool taken = blkBranchCondition(hCPU, e->d, e->a);
+        if (taken)
+            cemu_assert_unimplemented(); // Match the classic interpreter's diagnostic.
+        const uint32 ip = blkTakeBranch(hCPU, e, ctx, taken);
+        PPC_BLOCK_CHAIN(ip);
     }
 
     template<bool isSigned, bool isImm>
@@ -1950,7 +1950,7 @@ public:
         const uint32 bit = bc->a & 3; // 0 lt, 1 gt, 2 eq, so (3) is never fused
         const bool crBit = bit == 0 ? lt : (bit == 1 ? gt : (!lt && !gt));
         const uint32 ip = blkTakeBranch(hCPU, bc, ctx, crBit == ((bc->d & 8) != 0));
-        PPC_BLOCK_CHAIN(ip, blkAddr(bc, ctx) + 4);
+        PPC_BLOCK_CHAIN(ip);
     }
 
     PPC_BLOCK_OP(blkBCLRX)
@@ -1960,12 +1960,11 @@ public:
         {
             ip = hCPU->spr.LR & 0xfffffffc;
             if (e->x)
-                hCPU->spr.LR = blkAddr(e, ctx) + 4;
+                hCPU->spr.LR = ctx->blockFallthrough;
         }
         else
-            ip = blkAddr(e, ctx) + 4;
-        hCPU->instructionPointer = ip;
-        PPC_BLOCK_CHAIN(ip, blkAddr(e, ctx) + 4);
+            ip = ctx->blockFallthrough;
+        PPC_BLOCK_CHAIN(ip);
     }
     PPC_BLOCK_OP(blkBCCTR)
     {
@@ -1977,12 +1976,11 @@ public:
         {
             ip = hCPU->spr.CTR & 0xfffffffc;
             if (e->x)
-                hCPU->spr.LR = blkAddr(e, ctx) + 4;
+                hCPU->spr.LR = ctx->blockFallthrough;
         }
         else
-            ip = blkAddr(e, ctx) + 4;
-        hCPU->instructionPointer = ip;
-        PPC_BLOCK_CHAIN(ip, blkAddr(e, ctx) + 4);
+            ip = ctx->blockFallthrough;
+        PPC_BLOCK_CHAIN(ip);
     }
 
     PPC_BLOCK_OP(blkLI) { blkSetGpr(hCPU, e->d, e->imm, cachedSP); PPC_BLOCK_NEXT(); }
@@ -2054,7 +2052,7 @@ public:
         PPC_BLOCK_NEXT();
     }
     
-    template<bool subtract, bool extended, uint32 operand = 0>
+    template<bool subtract, bool extended, uint32 operand = 0, bool overflow = false, bool writeCarry = true>
     PPC_BLOCK_OP(blkCarry)
     {
         const uint32 a = subtract ? ~blkGetGpr(hCPU, e->a, cachedSP) : blkGetGpr(hCPU, e->a, cachedSP);
@@ -2063,7 +2061,10 @@ public:
         const uint64 sum = uint64(a) + b + carry;
         const uint32 r = uint32(sum);
         blkSetGpr(hCPU, e->d, r, cachedSP);
-        hCPU->xer_ca = uint8(sum >> 32);
+        if constexpr (writeCarry)
+            hCPU->xer_ca = uint8(sum >> 32);
+        if constexpr (overflow)
+            PPCInterpreter_setXerOV(hCPU, checkAdditionOverflow(a, b, r));
         if (e->x)
             ppc_update_cr0(hCPU, r);
         PPC_BLOCK_NEXT();
@@ -2091,7 +2092,7 @@ public:
     }
     PPC_BLOCK_ARITH(blkADD, ra + rb)
     PPC_BLOCK_ARITH(blkSUBF, ~ra + rb + 1)
-    PPC_BLOCK_ARITH(blkNEG, (uint32)-(sint32)ra)
+    PPC_BLOCK_ARITH(blkNEG, 0u - ra)
     PPC_BLOCK_ARITH(blkMULLW, (uint32)((sint64)ra * (sint64)rb))
     PPC_BLOCK_ARITH(blkMULHW, (uint32)((uint64)((sint64)(sint32)ra * (sint64)(sint32)rb) >> 32))
     PPC_BLOCK_ARITH(blkMULHWU, (uint32)(((uint64)ra * rb) >> 32))
@@ -2100,6 +2101,9 @@ public:
     PPC_BLOCK_LOGIC(blkXOR, rs ^ rb)
     PPC_BLOCK_LOGIC(blkANDC, rs & ~rb)
     PPC_BLOCK_LOGIC(blkNOR, ~(rs | rb))
+    PPC_BLOCK_LOGIC(blkORC, rs | ~rb)
+    PPC_BLOCK_LOGIC(blkNAND, ~(rs & rb))
+    PPC_BLOCK_LOGIC(blkEQV, ~(rs ^ rb))
     PPC_BLOCK_LOGIC(blkEXTSB, (uint32)(sint32)(sint8)rs)
     PPC_BLOCK_LOGIC(blkEXTSH, (uint32)(sint32)(sint16)rs)
     PPC_BLOCK_LOGIC(blkCNTLZW, (uint32)std::countl_zero(rs))
@@ -2107,6 +2111,51 @@ public:
     PPC_BLOCK_LOGIC(blkSRW, (rb & 0x3f) > 31 ? 0 : rs >> (rb & 0x3f))
 #undef PPC_BLOCK_ARITH
 #undef PPC_BLOCK_LOGIC
+    template<bool isSigned, bool overflow>
+    PPC_BLOCK_OP(blkDivide)
+    {
+        const uint32 a = blkGetGpr(hCPU, e->a, cachedSP);
+        const uint32 b = blkGetGpr(hCPU, e->b, cachedSP);
+        // Preserve the classic results for zero divisors and this operand pair.
+        const bool specialPair = a == 0x80000000u && b == 0xFFFFFFFFu;
+        const bool exceptional = b == 0 || specialPair;
+        uint32 result;
+        if constexpr (isSigned)
+            result = exceptional ? 0u - (a >> 31) : uint32(sint32(a) / sint32(b));
+        else
+            result = exceptional ? 0 : a / b;
+        if constexpr (overflow)
+            PPCInterpreter_setXerOV(hCPU, b == 0 || (isSigned && specialPair));
+        blkSetGpr(hCPU, e->d, result, cachedSP);
+        if (e->x)
+            ppc_update_cr0(hCPU, result);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMULLWO)
+    {
+        const sint64 a = sint32(blkGetGpr(hCPU, e->a, cachedSP));
+        const sint64 b = sint32(blkGetGpr(hCPU, e->b, cachedSP));
+        const sint64 product = a * b;
+        const uint32 result = uint32(product);
+        PPCInterpreter_setXerOV(hCPU, product != sint32(result));
+        blkSetGpr(hCPU, e->d, result, cachedSP);
+        if (e->x)
+            ppc_update_cr0(hCPU, result);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkNEGO)
+    {
+        const uint32 value = blkGetGpr(hCPU, e->a, cachedSP);
+        const uint32 result = 0u - value;
+        PPCInterpreter_setXerOV(hCPU, value == 0x80000000u);
+        blkSetGpr(hCPU, e->d, result, cachedSP);
+        if (e->x)
+            ppc_update_cr0(hCPU, result);
+        PPC_BLOCK_NEXT();
+    }
+
     // b: SH
     PPC_BLOCK_OP(blkSRAWI)
     {
@@ -2156,101 +2205,240 @@ public:
     }
     PPC_BLOCK_OP(blkMFLR) { blkSetGpr(hCPU, e->d, hCPU->spr.LR, cachedSP); PPC_BLOCK_NEXT(); }
     PPC_BLOCK_OP(blkMFCTR) { blkSetGpr(hCPU, e->d, hCPU->spr.CTR, cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMFCR) { blkSetGpr(hCPU, e->d, hCPU->cr, cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMTCRF)
+    {
+        const uint32 mask = e->imm;
+        hCPU->cr = (hCPU->cr & ~mask) | (blkGetGpr(hCPU, e->d, cachedSP) & mask);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMCRF)
+    {
+        ppc_setCRField(hCPU, e->d, ppc_getCRField(hCPU, e->a));
+        PPC_BLOCK_NEXT();
+    }
+
+    // Encode the CR logic as a four-bit truth table at decode time.
+    template<uint32 TruthTable>
+    PPC_BLOCK_OP(blkCRLogic)
+    {
+        const uint32 a = ppc_getCRBit(hCPU, e->a);
+        const uint32 b = ppc_getCRBit(hCPU, e->b);
+        ppc_setCRBit(hCPU, e->d, (TruthTable >> ((a << 1) | b)) & 1);
+        PPC_BLOCK_NEXT();
+    }
     PPC_BLOCK_OP(blkMTLR) { hCPU->spr.LR = blkGetGpr(hCPU, e->d, cachedSP); PPC_BLOCK_NEXT(); }
     PPC_BLOCK_OP(blkMTCTR) { hCPU->spr.CTR = blkGetGpr(hCPU, e->d, cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMFSPR) { blkSetGpr(hCPU, e->d, PPCSpr_get(hCPU, e->imm), cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMTSPR) { PPCSpr_set(hCPU, e->imm, blkGetGpr(hCPU, e->d, cachedSP)); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMFGQR) { blkSetGpr(hCPU, e->d, hCPU->spr.UGQR[e->imm], cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMTGQR) { hCPU->spr.UGQR[e->imm] = blkGetGpr(hCPU, e->d, cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMFSR) { blkSetGpr(hCPU, e->d, getSR(hCPU, e->a), cachedSP); PPC_BLOCK_NEXT(); }
+    PPC_BLOCK_OP(blkMTSR) { setSR(hCPU, e->a, blkGetGpr(hCPU, e->d, cachedSP)); PPC_BLOCK_NEXT(); }
 
-#define PPC_BLOCK_LOAD(name, expr) \
-    PPC_BLOCK_OP(name) { const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm; blkSetGpr(hCPU, e->d, (expr), cachedSP); PPC_BLOCK_NEXT(); } \
-    PPC_BLOCK_OP(name##A) { const uint32 ea = e->imm; blkSetGpr(hCPU, e->d, (expr), cachedSP); PPC_BLOCK_NEXT(); } \
-    PPC_BLOCK_OP(name##X) { const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP); blkSetGpr(hCPU, e->d, (expr), cachedSP); PPC_BLOCK_NEXT(); }
-#define PPC_BLOCK_STORE(name, stmt) \
-    PPC_BLOCK_OP(name) { const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm; const uint32 v = blkGetGpr(hCPU, e->d, cachedSP); stmt; PPC_BLOCK_NEXT(); } \
-    PPC_BLOCK_OP(name##A) { const uint32 ea = e->imm; const uint32 v = blkGetGpr(hCPU, e->d, cachedSP); stmt; PPC_BLOCK_NEXT(); } \
-    PPC_BLOCK_OP(name##X) { const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP); const uint32 v = blkGetGpr(hCPU, e->d, cachedSP); stmt; PPC_BLOCK_NEXT(); }
-    PPC_BLOCK_LOAD(blkLWZ, blkRead32(hCPU, mem, ea))
-    PPC_BLOCK_LOAD(blkLBZ, blkRead8(hCPU, mem, ea))
-    PPC_BLOCK_LOAD(blkLHZ, blkRead16(hCPU, mem, ea))
-    PPC_BLOCK_LOAD(blkLHA, (uint32)(sint32)(sint16)blkRead16(hCPU, mem, ea))
-    PPC_BLOCK_STORE(blkSTW, blkWrite32(hCPU, mem, ea, v))
-    PPC_BLOCK_STORE(blkSTB, blkWrite8(hCPU, mem, ea, (uint8)v))
-    PPC_BLOCK_STORE(blkSTH, blkWrite16(hCPU, mem, ea, (uint16)v))
-#undef PPC_BLOCK_LOAD
-#undef PPC_BLOCK_STORE
+    template<bool Upper>
+    PPC_BLOCK_OP(blkMFTB)
+    {
+        const uint64 time = ppcItpCtrl::getTB(hCPU);
+        blkSetGpr(hCPU, e->d, uint32(Upper ? time >> 32 : time), cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
     PPC_BLOCK_OP(blkNOP) { PPC_BLOCK_NEXT(); }
-    PPC_BLOCK_OP(blkSTWU)
+
+    template<bool Indexed, bool ZeroBase>
+    static FORCE_INLINE uint32 blkMemAddress(PPCInterpreter_t* hCPU, const PPCBlockEntry* e, uint32 cachedSP)
     {
-        const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm;
-        blkWrite32(hCPU, mem, ea, blkGetGpr(hCPU, e->d, cachedSP));
-        blkSetGpr(hCPU, e->a, ea, cachedSP);
-        PPC_BLOCK_NEXT();
+        const uint32 offset = Indexed ? blkGetGpr(hCPU, e->b, cachedSP) : e->imm;
+        if constexpr (ZeroBase)
+            return offset;
+        return blkGetGpr(hCPU, e->a, cachedSP) + offset;
     }
-    PPC_BLOCK_OP(blkSTBU)
+
+    template<uint32 Size, bool Indexed, bool ZeroBase, bool Update, bool Signed = false, bool Reversed = false>
+    PPC_BLOCK_OP(blkIntegerLoad)
     {
-        const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm;
-        blkWrite8(hCPU, mem, ea, (uint8)blkGetGpr(hCPU, e->d, cachedSP));
-        blkSetGpr(hCPU, e->a, ea, cachedSP);
-        PPC_BLOCK_NEXT();
-    }
-    PPC_BLOCK_OP(blkLWZU)
-    {
-        const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm;
-        blkSetGpr(hCPU, e->a, ea, cachedSP);
-        blkSetGpr(hCPU, e->d, blkRead32(hCPU, mem, ea), cachedSP);
-        PPC_BLOCK_NEXT();
-    }
-    PPC_BLOCK_OP(blkLBZU)
-    {
-        const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm;
-        blkSetGpr(hCPU, e->a, ea, cachedSP);
-        blkSetGpr(hCPU, e->d, blkRead8(hCPU, mem, ea), cachedSP);
-        PPC_BLOCK_NEXT();
-    }
-    PPC_BLOCK_OP(blkLFS)
-    {
-        const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + e->imm;
-        uint64 val;
-        if constexpr (ppcItpCtrl::allowSupervisorMode)
-            val = ppcItpCtrl::ppcMem_readDataFloatEx(hCPU, ea);
-        else
-            val = ConvertToDoubleNoFTZ(blkRead32(hCPU, mem, ea));
-        if (PPC_LSQE)
-            hCPU->fpr[e->d].fp0int = hCPU->fpr[e->d].fp1int = val;
-        else
-            hCPU->fpr[e->d].fp0int = val;
-        PPC_BLOCK_NEXT();
-    }
-    PPC_BLOCK_OP(blkLFD)
-    {
-        const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + e->imm;
-        if constexpr (ppcItpCtrl::allowSupervisorMode)
-            hCPU->fpr[e->d].fpr = ppcItpCtrl::ppcMem_readDataDouble(hCPU, ea);
-        else
+        const uint32 ea = blkMemAddress<Indexed, ZeroBase>(hCPU, e, cachedSP);
+        if constexpr (Update)
+            blkSetGpr(hCPU, e->a, ea, cachedSP);
+        uint32 value;
+        if constexpr (Size == 4)
         {
-            uint64 v;
-            std::memcpy(&v, mem + ea, sizeof(v));
-            hCPU->fpr[e->d].fp0int = CPU_swapEndianU64(v);
+            value = blkRead32(hCPU, mem, ea);
+            if constexpr (Reversed)
+                value = CPU_swapEndianU32(value);
+        }
+        else if constexpr (Size == 2)
+        {
+            value = blkRead16(hCPU, mem, ea);
+            if constexpr (Signed)
+                value = uint32(sint32(sint16(value)));
+            if constexpr (Reversed)
+                value = CPU_swapEndianU16(uint16(value));
+        }
+        else
+            value = blkRead8(hCPU, mem, ea);
+        blkSetGpr(hCPU, e->d, value, cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<uint32 Size, bool Indexed, bool ZeroBase, bool Update, bool Reversed = false>
+    PPC_BLOCK_OP(blkIntegerStore)
+    {
+        const uint32 ea = blkMemAddress<Indexed, ZeroBase>(hCPU, e, cachedSP);
+        const uint32 value = blkGetGpr(hCPU, e->d, cachedSP);
+        if constexpr (Size == 4)
+            blkWrite32(hCPU, mem, ea, Reversed ? CPU_swapEndianU32(value) : value);
+        else if constexpr (Size == 2)
+            blkWrite16(hCPU, mem, ea, Reversed ? CPU_swapEndianU16(uint16(value)) : uint16(value));
+        else
+            blkWrite8(hCPU, mem, ea, uint8(value));
+        if constexpr (Update)
+            blkSetGpr(hCPU, e->a, ea, cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<uint32 Size, bool Indexed, bool Signed = false>
+    static PPCBlockFn decodeLoadUpdate(const PPCBlockEntry& en)
+    {
+        if (!en.a)
+            return blkIntegerLoad<Size, Indexed, true, false, Signed>;
+        if (en.a == en.d)
+            return blkIntegerLoad<Size, Indexed, false, false, Signed>;
+        return blkIntegerLoad<Size, Indexed, false, true, Signed>;
+    }
+
+    template<uint32 Size, bool Indexed>
+    static PPCBlockFn decodeStoreUpdate(const PPCBlockEntry& en)
+    {
+        return en.a ? blkIntegerStore<Size, Indexed, false, true> : blkIntegerStore<Size, Indexed, true, false>;
+    }
+
+    PPC_BLOCK_OP(blkLHZUAliased)
+    {
+        // The classic LHZU operation increments the value just loaded if rA == rD.
+        const uint32 ea = blkGetGpr(hCPU, e->a, cachedSP) + e->imm;
+        blkSetGpr(hCPU, e->d, blkRead16(hCPU, mem, ea) + e->imm, cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<bool Store>
+    PPC_BLOCK_OP(blkMultipleMemory)
+    {
+        uint32 address = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + e->imm;
+        for (uint32 reg = e->d; reg < 32; ++reg, address += 4)
+        {
+            if constexpr (Store)
+                blkWrite32(hCPU, mem, address, blkGetGpr(hCPU, reg, cachedSP));
+            else
+                blkSetGpr(hCPU, reg, blkRead32(hCPU, mem, address), cachedSP);
         }
         PPC_BLOCK_NEXT();
     }
-    PPC_BLOCK_OP(blkSTFS)
+
+    template<bool Store, bool Indexed>
+    PPC_BLOCK_OP(blkStringMemory)
     {
-        const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + e->imm;
-        if constexpr (ppcItpCtrl::allowSupervisorMode)
-            ppcItpCtrl::ppcMem_writeDataFloatEx(hCPU, ea, hCPU->fpr[e->d].fp0int);
-        else
-            blkWrite32(hCPU, mem, ea, ConvertToSingleNoFTZ(hCPU->fpr[e->d].fp0int));
+        uint32 count = Indexed ? hCPU->spr.XER & 0x7F : e->imm;
+        uint32 address = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0);
+        if constexpr (Indexed)
+            address += blkGetGpr(hCPU, e->b, cachedSP);
+        uint32 reg = e->d;
+        while (count)
+        {
+            const uint32 bytes = std::min(count, 4u);
+            if constexpr (Store)
+            {
+                const uint32 value = blkGetGpr(hCPU, reg, cachedSP);
+                for (uint32 i = 0; i < bytes; ++i)
+                    blkWrite8(hCPU, mem, address++, uint8(value >> (24 - 8 * i)));
+            }
+            else
+            {
+                uint32 value = 0;
+                for (uint32 i = 0; i < bytes; ++i)
+                    value |= uint32(blkRead8(hCPU, mem, address++)) << (24 - 8 * i);
+                blkSetGpr(hCPU, reg, value, cachedSP);
+            }
+            count -= bytes;
+            reg = (reg + 1) & 31;
+        }
         PPC_BLOCK_NEXT();
     }
-    PPC_BLOCK_OP(blkSTFD)
+
+    PPC_BLOCK_OP(blkLWARX)
     {
-        const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + e->imm;
-        if constexpr (ppcItpCtrl::allowSupervisorMode)
-            ppcItpCtrl::ppcMem_writeDataDouble(hCPU, ea, hCPU->fpr[e->d].fpr);
+        const uint32 address = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP);
+        const uint32 value = blkRead32(hCPU, mem, address);
+        blkSetGpr(hCPU, e->d, value, cachedSP);
+        hCPU->reservedMemAddr = address;
+        hCPU->reservedMemValue = value;
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkSTWCX)
+    {
+        const uint32 address = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP);
+        PPCInterpreter_storeConditional<false>(hCPU, address, blkGetGpr(hCPU, e->d, cachedSP));
+        PPC_BLOCK_NEXT();
+    }
+
+    template<bool Flush>
+    PPC_BLOCK_OP(blkDataCache)
+    {
+        const uint32 address = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP);
+        if constexpr (Flush)
+            LatteBufferCache_notifyDCFlush(address, 32);
+        else
+            std::memset(mem + (address & ~31u), 0, 32);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<bool Indexed, bool ZeroBase, bool Update, bool Store, bool Single>
+    PPC_BLOCK_OP(blkFloatMemory)
+    {
+        const uint32 ea = blkMemAddress<Indexed, ZeroBase>(hCPU, e, cachedSP);
+        FPR_t& reg = hCPU->fpr[e->d];
+        if constexpr (Store)
+        {
+            if constexpr (Single)
+                blkWrite32(hCPU, mem, ea, ConvertToSingleNoFTZ(reg.fp0int));
+            else
+            {
+                const uint64 value = CPU_swapEndianU64(reg.fp0int);
+                std::memcpy(mem + ea, &value, sizeof(value));
+            }
+        }
+        else if constexpr (Single)
+        {
+            const uint64 value = ConvertToDoubleNoFTZ(blkRead32(hCPU, mem, ea));
+            reg.fp0int = value;
+            if (PPC_LSQE)
+                reg.fp1int = value;
+        }
         else
         {
-            const uint64 v = CPU_swapEndianU64(hCPU->fpr[e->d].fp0int);
-            std::memcpy(mem + ea, &v, sizeof(v));
+            uint64 value;
+            std::memcpy(&value, mem + ea, sizeof(value));
+            reg.fp0int = CPU_swapEndianU64(value);
         }
+        if constexpr (Update)
+            blkSetGpr(hCPU, e->a, ea, cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<bool Indexed, bool Update, bool Store, bool Single>
+    static PPCBlockFn decodeFloatMemory(const PPCBlockEntry& en)
+    {
+        return en.a ? blkFloatMemory<Indexed, false, Update, Store, Single>
+                    : blkFloatMemory<Indexed, true, false, Store, Single>;
+    }
+
+    PPC_BLOCK_OP(blkSTFIWX)
+    {
+        const uint32 ea = (e->a ? blkGetGpr(hCPU, e->a, cachedSP) : 0) + blkGetGpr(hCPU, e->b, cachedSP);
+        blkWrite32(hCPU, mem, ea, uint32(hCPU->fpr[e->d].fp0int));
         PPC_BLOCK_NEXT();
     }
 
@@ -2278,6 +2466,16 @@ public:
             blkWrite32(hCPU, mem, ea, blkGetGpr(hCPU, second->d, cachedSP));
         else
             blkSetGpr(hCPU, second->d, blkRead32(hCPU, mem, ea), cachedSP);
+        PPC_BLOCK_ADVANCE(2);
+    }
+
+    PPC_BLOCK_OP(blkMFLR_STW)
+    {
+        const PPCBlockEntry* store = e + 1;
+        const uint32 lr = hCPU->spr.LR;
+        blkSetGpr(hCPU, e->d, lr, cachedSP);
+        const uint32 address = blkMemAddress<false, false>(hCPU, store, cachedSP);
+        blkWrite32(hCPU, mem, address, lr);
         PPC_BLOCK_ADVANCE(2);
     }
 
@@ -2322,12 +2520,24 @@ public:
     static FORCE_INLINE void name##_body([[maybe_unused]] FPR_t& fD, [[maybe_unused]] const FPR_t& fA, [[maybe_unused]] const FPR_t& fB, [[maybe_unused]] const FPR_t& fC)
     PPC_BLOCK_FP_OP(blkFMR) { fD.fpr = fB.fpr; }
     PPC_BLOCK_FP_OP(blkFNEG) { fD.guint = fB.guint ^ (1ULL << 63); }
+    PPC_BLOCK_FP_OP(blkFABS) { fD.guint = fB.guint & ~(1ULL << 63); }
+    PPC_BLOCK_FP_OP(blkFNABS) { fD.guint = fB.guint | (1ULL << 63); }
+    PPC_BLOCK_FP_OP(blkFSEL) { fD = fA.fp0 >= -0.0 ? fC : fB; }
+    PPC_BLOCK_FP_OP(blkFRSQRTE) { fD.fpr = frsqrte_espresso(fB.fpr); }
+    PPC_BLOCK_FP_OP(blkFRES)
+    {
+        fD.fpr = fres_espresso(fB.fpr);
+        if (PPC_PSE)
+            fD.fp1 = fD.fp0;
+    }
     PPC_BLOCK_FP_OP(blkFADD) { fD.fpr = fA.fpr + fB.fpr; }
     PPC_BLOCK_FP_OP(blkFSUB) { fD.fpr = fA.fpr - fB.fpr; }
     PPC_BLOCK_FP_OP(blkFMUL) { fD.fpr = fA.fpr * fC.fpr; }
     PPC_BLOCK_FP_OP(blkFDIV) { fD.fpr = fA.fpr / fB.fpr; }
     PPC_BLOCK_FP_OP(blkFMADD) { fD.fpr = fA.fpr * fC.fpr + fB.fpr; }
-    PPC_BLOCK_FP_OP(blkFMSUB) { fD.fpr = (fA.fpr * fC.fpr - fB.fpr); }
+    PPC_BLOCK_FP_OP(blkFMSUB) { fD.fpr = fA.fpr * fC.fpr - fB.fpr; }
+    PPC_BLOCK_FP_OP(blkFNMADD) { fD.fpr = -(fA.fpr * fC.fpr + fB.fpr); }
+    PPC_BLOCK_FP_OP(blkFNMSUB) { fD.fpr = -(fA.fpr * fC.fpr - fB.fpr); }
 
 #define PPC_BLOCK_FP_SINGLE(name, expr) \
     PPC_BLOCK_FP_OP(name) \
@@ -2342,6 +2552,9 @@ public:
     PPC_BLOCK_FP_SINGLE(blkFMULS, fA.fpr * roundTo25BitAccuracy(fC.fpr))
     PPC_BLOCK_FP_SINGLE(blkFMADDS, fA.fpr * roundTo25BitAccuracy(fC.fpr) + fB.fpr)
     PPC_BLOCK_FP_SINGLE(blkFMSUBS, fA.fp0 * roundTo25BitAccuracy(fC.fp0) - fB.fp0)
+    PPC_BLOCK_FP_SINGLE(blkFNMADDS, -(fA.fpr * roundTo25BitAccuracy(fC.fpr) + fB.fpr))
+    PPC_BLOCK_FP_SINGLE(blkFNMSUBS, -(fA.fp0 * roundTo25BitAccuracy(fC.fp0) - fB.fp0))
+    PPC_BLOCK_FP_SINGLE(blkFRSP, fB.fpr)
 #undef PPC_BLOCK_FP_SINGLE
 
     // both slots are computed before frD is written, frD may alias a source
@@ -2355,6 +2568,28 @@ public:
     }
     PPC_BLOCK_PS(blkPS_MR, fB.fp0, fB.fp1)
     PPC_BLOCK_PS(blkPS_NEG, -fB.fp0, -fB.fp1)
+    PPC_BLOCK_FP_OP(blkPS_ABS)
+    {
+        fD.fp0int = fB.fp0int & ~(1ULL << 63);
+        fD.fp1int = fB.fp1int & ~(1ULL << 63);
+    }
+    PPC_BLOCK_FP_OP(blkPS_NABS)
+    {
+        fD.fp0int = fB.fp0int | (1ULL << 63);
+        fD.fp1int = fB.fp1int | (1ULL << 63);
+    }
+    PPC_BLOCK_PS(blkPS_DIV, (float)(fA.fp0 / fB.fp0), (float)(fA.fp1 / fB.fp1))
+    PPC_BLOCK_PS(blkPS_SEL, fA.fp0 >= -0.0 ? fC.fp0 : fB.fp0, fA.fp1 >= -0.0 ? fC.fp1 : fB.fp1)
+    PPC_BLOCK_PS(blkPS_SUM0, (float)(fA.fp0 + fB.fp1), (float)fC.fp1)
+    PPC_BLOCK_PS(blkPS_SUM1, (float)fC.fp0, (float)(fA.fp0 + fB.fp1))
+    PPC_BLOCK_PS(blkPS_RES, (float)fres_espresso(fB.fp0), (float)fres_espresso(fB.fp1))
+    PPC_BLOCK_PS(blkPS_RSQRTE, (float)frsqrte_espresso(fB.fp0), (float)frsqrte_espresso(fB.fp1))
+    PPC_BLOCK_PS(blkPS_NMADD,
+        (float)-(fA.fp0 * roundTo25BitAccuracy(fC.fp0) + fB.fp0),
+        (float)-(fA.fp1 * roundTo25BitAccuracy(fC.fp1) + fB.fp1))
+    PPC_BLOCK_PS(blkPS_NMSUB,
+        (float)-(fA.fp0 * roundTo25BitAccuracy(fC.fp0) - fB.fp0),
+        (float)-(fA.fp1 * roundTo25BitAccuracy(fC.fp1) - fB.fp1))
     PPC_BLOCK_PS(blkPS_MERGE00, fA.fp0, fB.fp0)
     PPC_BLOCK_PS(blkPS_MERGE01, fA.fp0, fB.fp1)
     PPC_BLOCK_PS(blkPS_MERGE10, fA.fp1, fB.fp0)
@@ -2380,210 +2615,65 @@ public:
         (float)(fA.fp1 * roundTo25BitAccuracy(fC.fp1) + fB.fp1))
 #undef PPC_BLOCK_PS
 #undef PPC_BLOCK_FP_OP
-    
-    static PPCLegacyOp legacyHandler(uint32 opcode, PPCBlockTerm& term)
-    {
-        static constexpr auto s_table19 = makeHandlerTable19();
-        static constexpr auto s_table31 = makeHandlerTable31();
-        term = PPCBlockTerm::None;
-        PPCLegacyOp fn{};
-        switch (opcode >> 26)
-        {
-        case 4:
-            switch (PPC_getBits(opcode, 30, 5))
-            {
-            case 0:
-                switch (PPC_getBits(opcode, 25, 5))
-                {
-                case 0: fn = legacyOp<PPCInterpreter_PS_CMPU0>(); break;
-                case 1: fn = legacyOp<PPCInterpreter_PS_CMPO0>(); break;
-                case 2: fn = legacyOp<PPCInterpreter_PS_CMPU1>(); break;
-                default: break;
-                }
-                break;
-            case 6: fn = legacyOp<PPCInterpreter_PSQ_LX>(); break;
-            case 7: fn = legacyOp<PPCInterpreter_PSQ_STX>(); break;
-            case 8:
-                switch (PPC_getBits(opcode, 25, 5))
-                {
-                case 1: fn = legacyOp<PPCInterpreter_PS_NEG>(); break;
-                case 2: fn = legacyOp<PPCInterpreter_PS_MR>(); break;
-                case 4: fn = legacyOp<PPCInterpreter_PS_NABS>(); break;
-                case 8: fn = legacyOp<PPCInterpreter_PS_ABS>(); break;
-                default: break;
-                }
-                break;
-            case 10: fn = legacyOp<PPCInterpreter_PS_SUM0>(); break;
-            case 11: fn = legacyOp<PPCInterpreter_PS_SUM1>(); break;
-            case 12: fn = legacyOp<PPCInterpreter_PS_MULS0>(); break;
-            case 13: fn = legacyOp<PPCInterpreter_PS_MULS1>(); break;
-            case 14: fn = legacyOp<PPCInterpreter_PS_MADDS0>(); break;
-            case 15: fn = legacyOp<PPCInterpreter_PS_MADDS1>(); break;
-            case 16:
-                switch (PPC_getBits(opcode, 25, 5))
-                {
-                case 16: fn = legacyOp<PPCInterpreter_PS_MERGE00>(); break;
-                case 17: fn = legacyOp<PPCInterpreter_PS_MERGE01>(); break;
-                case 18: fn = legacyOp<PPCInterpreter_PS_MERGE10>(); break;
-                case 19: fn = legacyOp<PPCInterpreter_PS_MERGE11>(); break;
-                default: break;
-                }
-                break;
-            case 18: fn = legacyOp<PPCInterpreter_PS_DIV>(); break;
-            case 20: fn = legacyOp<PPCInterpreter_PS_SUB>(); break;
-            case 21: fn = legacyOp<PPCInterpreter_PS_ADD>(); break;
-            case 22: fn = legacyOp<PPCInterpreter_DCBZL>(); break;
-            case 23: fn = legacyOp<PPCInterpreter_PS_SEL>(); break;
-            case 24: fn = legacyOp<PPCInterpreter_PS_RES>(); break;
-            case 25: fn = legacyOp<PPCInterpreter_PS_MUL>(); break;
-            case 26: fn = legacyOp<PPCInterpreter_PS_RSQRTE>(); break;
-            case 28: fn = legacyOp<PPCInterpreter_PS_MSUB>(); break;
-            case 29: fn = legacyOp<PPCInterpreter_PS_MADD>(); break;
-            case 30: fn = legacyOp<PPCInterpreter_PS_NMSUB>(); break;
-            case 31: fn = legacyOp<PPCInterpreter_PS_NMADD>(); break;
-            default: break;
-            }
-            break;
-        case 7: fn = legacyOp<PPCInterpreter_MULLI>(); break;
-        case 8: fn = legacyOp<PPCInterpreter_SUBFIC>(); break;
-        case 10: fn = legacyOp<PPCInterpreter_CMPLI>(); break;
-        case 11: fn = legacyOp<PPCInterpreter_CMPI>(); break;
-        case 12: fn = legacyOp<PPCInterpreter_ADDIC>(); break;
-        case 13: fn = legacyOp<PPCInterpreter_ADDIC_>(); break;
-        case 14: fn = legacyOp<PPCInterpreter_ADDI>(); break;
-        case 15: fn = legacyOp<PPCInterpreter_ADDIS>(); break;
-        case 16: term = PPCBlockTerm::BCX; break;
-        case 18: term = PPCBlockTerm::BX; break;
-        case 19:
-        {
-            const uint32 ext = PPC_getBits(opcode, 30, 10);
-            if (ext == 16)
-                term = PPCBlockTerm::BCLRX;
-            else if (ext == 528)
-                term = PPCBlockTerm::BCCTR;
-            else if (ext == 50 || ext == 150) // rfi, isync > classic path, terminate
-                term = PPCBlockTerm::Generic;
-            else
-                fn = s_table19[ext]; // cr ops, mcrf: straight-line
-            break;
-        }
-        case 20: fn = legacyOp<PPCInterpreter_RLWIMI>(); break;
-        case 21: fn = legacyOp<PPCInterpreter_RLWINM>(); break;
-        case 23: fn = legacyOp<PPCInterpreter_RLWNM>(); break;
-        case 24: fn = legacyOp<PPCInterpreter_ORI>(); break;
-        case 25: fn = legacyOp<PPCInterpreter_ORIS>(); break;
-        case 26: fn = legacyOp<PPCInterpreter_XORI>(); break;
-        case 27: fn = legacyOp<PPCInterpreter_XORIS>(); break;
-        case 28: fn = legacyOp<PPCInterpreter_ANDI_>(); break;
-        case 29: fn = legacyOp<PPCInterpreter_ANDIS_>(); break;
-        case 31:
-        {
-            const uint32 ext = PPC_getBits(opcode, 30, 10);
-            if (ext == 982) // icbi
-            {
-                fn = legacyOp<blockICBI>();
-                term = PPCBlockTerm::Generic;
-            }
-            else if (ext == 4 || ext == 146) // tw, mtmsr -> classic path, terminate
-                term = PPCBlockTerm::Generic;
-            else
-                fn = s_table31[ext];
-            break;
-        }
-        case 32: fn = legacyOp<PPCInterpreter_LWZ>(); break;
-        case 33: fn = legacyOp<PPCInterpreter_LWZU>(); break;
-        case 34: fn = legacyOp<PPCInterpreter_LBZ>(); break;
-        case 35: fn = legacyOp<PPCInterpreter_LBZU>(); break;
-        case 36: fn = legacyOp<PPCInterpreter_STW>(); break;
-        case 37: fn = legacyOp<PPCInterpreter_STWU>(); break;
-        case 38: fn = legacyOp<PPCInterpreter_STB>(); break;
-        case 39: fn = legacyOp<PPCInterpreter_STBU>(); break;
-        case 40: fn = legacyOp<PPCInterpreter_LHZ>(); break;
-        case 41: fn = legacyOp<PPCInterpreter_LHZU>(); break;
-        case 42: fn = legacyOp<PPCInterpreter_LHA>(); break;
-        case 43: fn = legacyOp<PPCInterpreter_LHAU>(); break;
-        case 44: fn = legacyOp<PPCInterpreter_STH>(); break;
-        case 45: fn = legacyOp<PPCInterpreter_STHU>(); break;
-        case 46: fn = legacyOp<PPCInterpreter_LMW>(); break;
-        case 47: fn = legacyOp<PPCInterpreter_STMW>(); break;
-        case 48: fn = legacyOp<PPCInterpreter_LFS>(); break;
-        case 49: fn = legacyOp<PPCInterpreter_LFSU>(); break;
-        case 50: fn = legacyOp<PPCInterpreter_LFD>(); break;
-        case 51: fn = legacyOp<PPCInterpreter_LFDU>(); break;
-        case 52: fn = legacyOp<PPCInterpreter_STFS>(); break;
-        case 53: fn = legacyOp<PPCInterpreter_STFSU>(); break;
-        case 54: fn = legacyOp<PPCInterpreter_STFD>(); break;
-        case 55: fn = legacyOp<PPCInterpreter_STFDU>(); break;
-        case 56: fn = legacyOp<PPCInterpreter_PSQ_L>(); break;
-        case 57: fn = legacyOp<PPCInterpreter_PSQ_LU>(); break;
-        case 59:
-            switch (PPC_getBits(opcode, 30, 5))
-            {
-            case 18: fn = legacyOp<PPCInterpreter_FDIVS>(); break;
-            case 20: fn = legacyOp<PPCInterpreter_FSUBS>(); break;
-            case 21: fn = legacyOp<PPCInterpreter_FADDS>(); break;
-            case 24: fn = legacyOp<PPCInterpreter_FRES>(); break;
-            case 25: fn = legacyOp<PPCInterpreter_FMULS>(); break;
-            case 28: fn = legacyOp<PPCInterpreter_FMSUBS>(); break;
-            case 29: fn = legacyOp<PPCInterpreter_FMADDS>(); break;
-            case 30: fn = legacyOp<PPCInterpreter_FNMSUBS>(); break;
-            case 31: fn = legacyOp<PPCInterpreter_FNMADDS>(); break;
-            default: break;
-            }
-            break;
-        case 60: fn = legacyOp<PPCInterpreter_PSQ_ST>(); break;
-        case 61: fn = legacyOp<PPCInterpreter_PSQ_STU>(); break;
-        case 63:
-            switch (PPC_getBits(opcode, 30, 5))
-            {
-            case 0: fn = legacyOp<PPCInterpreter_FCMPU>(); break;
-            case 12: fn = legacyOp<PPCInterpreter_FRSP>(); break;
-            case 15: fn = legacyOp<PPCInterpreter_FCTIWZ>(); break;
-            case 18: fn = legacyOp<PPCInterpreter_FDIV>(); break;
-            case 20: fn = legacyOp<PPCInterpreter_FSUB>(); break;
-            case 21: fn = legacyOp<PPCInterpreter_FADD>(); break;
-            case 23: fn = legacyOp<PPCInterpreter_FSEL>(); break;
-            case 25: fn = legacyOp<PPCInterpreter_FMUL>(); break;
-            case 26: fn = legacyOp<PPCInterpreter_FRSQRTE>(); break;
-            case 28: fn = legacyOp<PPCInterpreter_FMSUB>(); break;
-            case 29: fn = legacyOp<PPCInterpreter_FMADD>(); break;
-            case 30: fn = legacyOp<PPCInterpreter_FNMSUB>(); break;
-            case 31: fn = legacyOp<PPCInterpreter_FNMADD>(); break;
-            default:
-                switch (PPC_getBits(opcode, 30, 10))
-                {
-                case 14: fn = legacyOp<PPCInterpreter_FCTIW>(); break;
-                case 32: fn = legacyOp<PPCInterpreter_FCMPO>(); break;
-                case 38: fn = legacyOp<PPCInterpreter_MTFSB1X>(); break;
-                case 40: fn = legacyOp<PPCInterpreter_FNEG>(); break;
-                case 72: fn = legacyOp<PPCInterpreter_FMR>(); break;
-                case 136: fn = legacyOp<PPCInterpreter_FNABS>(); break;
-                case 264: fn = legacyOp<PPCInterpreter_FABS>(); break;
-                case 583: fn = legacyOp<PPCInterpreter_MFFS>(); break;
-                case 711: fn = legacyOp<PPCInterpreter_MTFSF>(); break;
-                default: break;
-                }
-                break;
-            }
-            break;
-        case 1:
-            fn = legacyOp<PPCInterpreter_virtualHLE>();
-            term = PPCBlockTerm::Generic;
-            break;
-        default:
-            break;
-        }
 
-        // anything we can't map (or explicitly routed to Generic without a handler) uses the old path -stossy11
-        if (term == PPCBlockTerm::None && fn.legacy == nullptr)
-            term = PPCBlockTerm::Generic;
-        if (term == PPCBlockTerm::Generic && fn.legacy == nullptr)
-            fn = legacyOp<blockFallbackStep>();
-        return fn;
-    }
-    
-    static PPCBlockFn fastHandler(uint32 opcode, uint32 addr, PPCBlockEntry& en)
+    template<bool SecondLane>
+    PPC_BLOCK_OP(blkFCMPU)
     {
+        const FPR_t& a = hCPU->fpr[e->a];
+        const FPR_t& b = hCPU->fpr[e->b];
+        fcmpu_espresso(hCPU, e->d, SecondLane ? a.fp1 : a.fp0, SecondLane ? b.fp1 : b.fp0);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<void (*Operation)(PPCInterpreter_t*, uint32, uint32)>
+    PPC_BLOCK_OP(blkFPOperands)
+    {
+        Operation(hCPU, e->d, e->b);
+        PPC_BLOCK_NEXT();
+    }
+
+    template<void (*Operation)(PPCInterpreter_t*, uint32, uint32, uint32)>
+    PPC_BLOCK_OP(blkFPCompare)
+    {
+        Operation(hCPU, e->d, e->a, e->b);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMTFSF)
+    {
+        PPCInterpreter_writeFPSCR(hCPU, e->b, e->imm);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMTFSB1)
+    {
+        PPCInterpreter_setFPSCRBit(hCPU, e->d);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMCRXR)
+    {
+        PPCInterpreter_moveXERToCR(hCPU, e->d);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMFMSR)
+    {
+        cemuLog_logDebug(LogType::Force, "Rare instruction: MFMSR");
+        if ((hCPU->sprExtended.msr & MSR_PR) == 0)
+            blkSetGpr(hCPU, e->d, hCPU->sprExtended.msr, cachedSP);
+        PPC_BLOCK_NEXT();
+    }
+
+    PPC_BLOCK_OP(blkMFFS)
+    {
+        hCPU->fpr[e->d].guint = hCPU->fpscr;
+        PPC_BLOCK_NEXT();
+    }
+
+    static PPCBlockFn decodeBlockHandler(uint32 opcode, uint32 addr, PPCBlockEntry& en, PPCBlockTerm& term)
+    {
+        term = PPCBlockTerm::None;
         const uint32 rD = (opcode >> 21) & 31, rA = (opcode >> 16) & 31, rB = (opcode >> 11) & 31;
         const uint32 simm = (uint32)(sint32)(sint16)(opcode & 0xFFFF);
         const uint32 uimm = opcode & 0xFFFF;
@@ -2591,6 +2681,12 @@ public:
         en.d = (uint8)rD; en.a = (uint8)rA; en.b = (uint8)rB; en.x = rc;
         switch (opcode >> 26)
         {
+        case 0: term = PPCBlockTerm::Generic; return blkGenericTerm<blockZero>;
+        case 1:
+            term = PPCBlockTerm::Generic;
+            en.imm = uimm;
+            return blkGenericTerm<PPCInterpreter_executeHLE>;
+        case 3: term = PPCBlockTerm::Generic; return blkLocalTerm<blockTWI>;
         case 7: en.imm = simm; return blkMULLI;
         case 8: en.imm = simm; return blkSUBFIC;
         case 10: en.d = (uint8)(rD >> 2); en.imm = uimm; return blkCMPLI;
@@ -2602,15 +2698,23 @@ public:
         case 16:
         {
             const uint32 BD = (uint32)(sint32)(sint16)(opcode & 0xFFFC);
-            if (opcode & PPC_OPC_AA)
-                return nullptr;
-            en.imm = BD + addr;
+            const bool absolute = (opcode & PPC_OPC_AA) != 0;
+            term = PPCBlockTerm::BCX;
+            en.imm = absolute ? BD : BD + addr;
             en.d = (uint8)rD; en.a = (uint8)rA; en.x = (opcode & PPC_OPC_LK) ? 1 : 0;
             en.b = 0; // PPCBLOCK_BRANCH_* flags
-            return blkBCX;
+            return absolute ? blkBCXAbsolute : blkBCX;
         }
+        case 17:
+            if (opcode & 2)
+            {
+                term = PPCBlockTerm::Generic;
+                return blkLocalTerm<PPCInterpreter_SC>;
+            }
+            return nullptr;
         case 18:
         {
+            term = PPCBlockTerm::BX;
             uint32 li;
             PPC_OPC_TEMPL_I(opcode, li);
             if ((opcode & PPC_OPC_AA) == 0)
@@ -2624,11 +2728,23 @@ public:
         {
             const uint32 ext = PPC_getBits(opcode, 30, 10);
             en.x = (opcode & PPC_OPC_LK) ? 1 : 0;
-            if (ext == 16)
-                return blkBCLRX;
-            if (ext == 528)
-                return blkBCCTR;
-            return nullptr;
+            switch (ext)
+            {
+            case 0: en.d >>= 2; en.a >>= 2; return blkMCRF;
+            case 16: term = PPCBlockTerm::BCLRX; return blkBCLRX;
+            case 33: return blkCRLogic<0b0001>; // nor
+            case 129: return blkCRLogic<0b0100>; // andc
+            case 193: return blkCRLogic<0b0110>; // xor
+            case 225: return blkCRLogic<0b0111>; // nand
+            case 257: return blkCRLogic<0b1000>; // and
+            case 289: return blkCRLogic<0b1001>; // eqv
+            case 417: return blkCRLogic<0b1101>; // orc
+            case 449: return blkCRLogic<0b1110>; // or
+            case 50: term = PPCBlockTerm::Generic; return blkLocalTerm<PPCInterpreter_RFI>;
+            case 150: term = PPCBlockTerm::Generic; return blkEnd;
+            case 528: term = PPCBlockTerm::BCCTR; return blkBCCTR;
+            default: return nullptr;
+            }
         }
         case 20:
         {
@@ -2653,9 +2769,34 @@ public:
             switch (PPC_getBits(opcode, 30, 10))
             {
             case 0: en.d = (uint8)(rD >> 2); return blkCMP;
+            case 4: term = PPCBlockTerm::Generic; en.imm = (rD << 5) | rA; return blkGenericTerm<PPCInterpreter_executeTW>;
+            case 146: term = PPCBlockTerm::Generic; en.imm = rD; return blkLocalTerm<PPCInterpreter_writeMSR>;
+            case 83: return blkMFMSR;
+            case 512: en.d >>= 4; return blkMCRXR;
+            case 566: term = PPCBlockTerm::Generic; return blkLocalTerm<PPCInterpreter_TLBSYNC>;
+            case 54: case 86: return blkDataCache<true>;
+            case 1014: return blkDataCache<false>;
+            case 20: return blkLWARX;
+            case 150: return blkSTWCX;
+            case 210: en.a &= 15; return blkMTSR;
+            case 595: en.a &= 15; return blkMFSR;
+            case 533: return blkStringMemory<false, true>;
+            case 661: return blkStringMemory<true, true>;
+            case 597: en.imm = rB ? rB : 32; return blkStringMemory<false, false>;
+            case 725: en.imm = rB ? rB : 32; return blkStringMemory<true, false>;
+            case 982: term = PPCBlockTerm::Generic; return blkGenericTerm<blockICBI, true>;
             case 32: en.d = (uint8)(rD >> 2); return blkCMPL;
             case 266: return blkADD;
-            // OE variants retain the legacy handlers, including their SO/OV updates.
+            case 778: return blkCarry<false, false, 0, true, false>; // addo
+            case 552: return blkCarry<true, false, 0, true, false>; // subfo
+            case 522: return blkCarry<false, false, 0, true>; // addco
+            case 650: return blkCarry<false, true, 0, true>; // addeo
+            case 714: return blkCarry<false, true, 1, true>; // addzeo
+            case 746: return blkCarry<false, true, 2, true>; // addmeo
+            case 520: return blkCarry<true, false, 0, true>; // subfco
+            case 648: return blkCarry<true, true, 0, true>; // subfeo
+            case 712: return blkCarry<true, true, 1, true>; // subfzeo
+            case 744: return blkCarry<true, true, 2, true>; // subfmeo
             case 10: return blkCarry<false, false>; // addc
             case 138: return blkCarry<false, true>; // adde
             case 202: return blkCarry<false, true, 1>; // addze
@@ -2666,14 +2807,26 @@ public:
             case 232: return blkCarry<true, true, 2>; // subfme
             case 40: return blkSUBF;
             case 104: return blkNEG;
+            case 616: return blkNEGO;
             case 235: return blkMULLW;
-            case 75: return blkMULHW;
-            case 11: return blkMULHWU;
+            case 747: return blkMULLWO;
+            case 75: case 587: return blkMULHW;
+            case 11: case 523: return blkMULHWU;
+            case 491: return blkDivide<true, false>;
+            case 1003: return blkDivide<true, true>;
+            case 459: return blkDivide<false, false>;
+            case 971: return blkDivide<false, true>;
             case 444: return blkOR;
             case 28: return blkAND;
             case 316: return blkXOR;
             case 60: return blkANDC;
             case 124: return blkNOR;
+            case 412: return blkORC;
+            case 476: return blkNAND;
+            case 284: return blkEQV;
+            case 19: return blkMFCR;
+            case 144: en.imm = ppc_MTCRFMaskToPackedMask((opcode >> 12) & 255); return blkMTCRF;
+            case 278: case 306: case 470: case 598: case 854: return blkNOP;
             case 954: return blkEXTSB;
             case 922: return blkEXTSH;
             case 26: return blkCNTLZW;
@@ -2686,54 +2839,121 @@ public:
                 const uint32 spr = rA | (rB << 5);
                 if (spr == SPR_LR) return blkMFLR;
                 if (spr == SPR_CTR) return blkMFCTR;
-                return nullptr;
+                if (spr >= SPR_UGQR0 && spr <= SPR_UGQR7)
+                {
+                    en.imm = spr - SPR_UGQR0;
+                    return blkMFGQR;
+                }
+                en.imm = spr;
+                return blkMFSPR;
             }
             case 467:
             {
                 const uint32 spr = rA | (rB << 5);
                 if (spr == SPR_LR) return blkMTLR;
                 if (spr == SPR_CTR) return blkMTCTR;
-                return nullptr;
+                if (spr >= SPR_UGQR0 && spr <= SPR_UGQR7)
+                {
+                    en.imm = spr - SPR_UGQR0;
+                    return blkMTGQR;
+                }
+                en.imm = spr;
+                return blkMTSPR;
             }
-            case 23: return blkLWZX;
-            case 87: return blkLBZX;
-            case 279: return blkLHZX;
-            case 343: return blkLHAX;
-            case 151: return blkSTWX;
-            case 215: return blkSTBX;
-            case 407: return blkSTHX;
+            case 371:
+            {
+                const uint32 spr = rA | (rB << 5);
+                if (spr == 268) return blkMFTB<false>;
+                if (spr == 269) return blkMFTB<true>;
+                return nullptr; // Invalid time-base register.
+            }
+            case 55: return decodeLoadUpdate<4, true>(en);
+            case 119: return decodeLoadUpdate<1, true>(en);
+            case 311: return decodeLoadUpdate<2, true>(en);
+            case 375: return decodeLoadUpdate<2, true, true>(en);
+            case 183: return decodeStoreUpdate<4, true>(en);
+            case 247: return decodeStoreUpdate<1, true>(en);
+            case 439: return decodeStoreUpdate<2, true>(en);
+            case 534: return rA ? blkIntegerLoad<4, true, false, false, false, true> : blkIntegerLoad<4, true, true, false, false, true>;
+            case 790: return rA ? blkIntegerLoad<2, true, false, false, false, true> : blkIntegerLoad<2, true, true, false, false, true>;
+            case 662: return rA ? blkIntegerStore<4, true, false, false, true> : blkIntegerStore<4, true, true, false, true>;
+            case 918: return rA ? blkIntegerStore<2, true, false, false, true> : blkIntegerStore<2, true, true, false, true>;
+            case 23: return rA ? blkIntegerLoad<4, true, false, false> : blkIntegerLoad<4, true, true, false>;
+            case 87: return rA ? blkIntegerLoad<1, true, false, false> : blkIntegerLoad<1, true, true, false>;
+            case 279: return rA ? blkIntegerLoad<2, true, false, false> : blkIntegerLoad<2, true, true, false>;
+            case 343: return rA ? blkIntegerLoad<2, true, false, false, true> : blkIntegerLoad<2, true, true, false, true>;
+            case 151: return rA ? blkIntegerStore<4, true, false, false> : blkIntegerStore<4, true, true, false>;
+            case 215: return rA ? blkIntegerStore<1, true, false, false> : blkIntegerStore<1, true, true, false>;
+            case 407: return rA ? blkIntegerStore<2, true, false, false> : blkIntegerStore<2, true, true, false>;
+            case 535: return decodeFloatMemory<true, false, false, true>(en);
+            case 567: return decodeFloatMemory<true, true, false, true>(en);
+            case 599: return decodeFloatMemory<true, false, false, false>(en);
+            case 631: return decodeFloatMemory<true, true, false, false>(en);
+            case 663: return decodeFloatMemory<true, false, true, true>(en);
+            case 695: return decodeFloatMemory<true, true, true, true>(en);
+            case 727: return decodeFloatMemory<true, false, true, false>(en);
+            case 759: return decodeFloatMemory<true, true, true, false>(en);
+            case 983: return blkSTFIWX;
             default: return nullptr;
             }
-        case 32: en.imm = simm; return rA ? blkLWZ : blkLWZA;
-        case 33: en.imm = simm; return blkLWZU;
-        case 34: en.imm = simm; return rA ? blkLBZ : blkLBZA;
-        case 35: en.imm = simm; return blkLBZU;
-        case 36: en.imm = simm; return rA ? blkSTW : blkNOP;
-        case 37: en.imm = simm; return blkSTWU;
-        case 38: en.imm = simm; return rA ? blkSTB : blkSTBA;
-        case 39: en.imm = simm; return blkSTBU;
-        case 40: en.imm = simm; return rA ? blkLHZ : blkLHZA;
-        case 42: en.imm = simm; return rA ? blkLHA : blkLHAA;
-        case 44: en.imm = simm; return rA ? blkSTH : blkSTHA;
+        case 32: en.imm = simm; return rA ? blkIntegerLoad<4, false, false, false> : blkIntegerLoad<4, false, true, false>;
+        case 33: en.imm = simm; return blkIntegerLoad<4, false, false, true>;
+        case 34: en.imm = simm; return rA ? blkIntegerLoad<1, false, false, false> : blkIntegerLoad<1, false, true, false>;
+        case 35: en.imm = simm; return blkIntegerLoad<1, false, false, true>;
+        case 36: en.imm = simm; return rA ? blkIntegerStore<4, false, false, false> : blkNOP;
+        case 37: en.imm = simm; return blkIntegerStore<4, false, false, true>;
+        case 38: en.imm = simm; return rA ? blkIntegerStore<1, false, false, false> : blkIntegerStore<1, false, true, false>;
+        case 39: en.imm = simm; return blkIntegerStore<1, false, false, true>;
+        case 40: en.imm = simm; return rA ? blkIntegerLoad<2, false, false, false> : blkIntegerLoad<2, false, true, false>;
+        case 41: en.imm = simm; return rA == rD ? blkLHZUAliased : blkIntegerLoad<2, false, false, true>;
+        case 42: en.imm = simm; return rA ? blkIntegerLoad<2, false, false, false, true> : blkIntegerLoad<2, false, true, false, true>;
+        case 43: en.imm = simm; return decodeLoadUpdate<2, false, true>(en);
+        case 44: en.imm = simm; return rA ? blkIntegerStore<2, false, false, false> : blkIntegerStore<2, false, true, false>;
+        case 45: en.imm = simm; return decodeStoreUpdate<2, false>(en);
+        case 46: en.imm = simm; return blkMultipleMemory<false>;
+        case 47: en.imm = simm; return blkMultipleMemory<true>;
         case 56: case 57: return decodePSQ<false, false>(opcode, en);
         case 60: case 61: return decodePSQ<true, false>(opcode, en);
-        case 48: en.imm = simm; return blkLFS;
-        case 50: en.imm = simm; return blkLFD;
-        case 52: en.imm = simm; return blkSTFS;
-        case 54: en.imm = simm; return blkSTFD;
+        case 48: en.imm = simm; return decodeFloatMemory<false, false, false, true>(en);
+        case 49: en.imm = simm; return decodeFloatMemory<false, true, false, true>(en);
+        case 50: en.imm = simm; return decodeFloatMemory<false, false, false, false>(en);
+        case 51: en.imm = simm; return decodeFloatMemory<false, true, false, false>(en);
+        case 52: en.imm = simm; return decodeFloatMemory<false, false, true, true>(en);
+        case 53: en.imm = simm; return decodeFloatMemory<false, true, true, true>(en);
+        case 54: en.imm = simm; return decodeFloatMemory<false, false, true, false>(en);
+        case 55:
+            en.imm = rA ? simm : 0;
+            return rA ? blkFloatMemory<false, false, true, true, false>
+                      : blkFloatMemory<false, false, false, true, false>;
         case 4:
             if (((opcode >> 1) & 31) == 6) return decodePSQ<false, true>(opcode, en);
             if (((opcode >> 1) & 31) == 7) return decodePSQ<true, true>(opcode, en);
             en.x = (uint8)((opcode >> 6) & 31);
             switch ((opcode >> 1) & 31)
             {
+            case 0:
+                en.d &= ~3u;
+                if (en.x == 0)
+                    return blkFCMPU<false>;
+                if (en.x == 2)
+                    return blkFCMPU<true>;
+                if (en.x == 1)
+                {
+                    en.d >>= 2;
+                    return blkFPCompare<PPCInterpreter_comparePairedOrdered>;
+                }
+                return nullptr;
             case 8:
                 switch ((opcode >> 1) & 0x3FF)
                 {
                 case 40: return blkPS_NEG;
                 case 72: return blkPS_MR;
+                case 136: return blkPS_NABS;
+                case 264: return blkPS_ABS;
                 default: return nullptr;
                 }
+            case 10: return blkPS_SUM0;
+            case 11: return blkPS_SUM1;
             case 12: return blkPS_MULS0;
             case 13: return blkPS_MULS1;
             case 14: return blkPS_MADDS0;
@@ -2747,11 +2967,18 @@ public:
                 case 624: return blkPS_MERGE11;
                 default: return nullptr;
                 }
+            case 18: return blkPS_DIV;
             case 20: return blkPS_SUB;
             case 21: return blkPS_ADD;
+            case 22: return blkNOP; // DCBZL is a no-op in the interpreter.
+            case 23: return blkPS_SEL;
+            case 24: return blkPS_RES;
             case 25: return blkPS_MUL;
+            case 26: return blkPS_RSQRTE;
             case 28: return blkPS_MSUB;
             case 29: return blkPS_MADD;
+            case 30: return blkPS_NMSUB;
+            case 31: return blkPS_NMADD;
             default: return nullptr;
             }
         case 59:
@@ -2761,26 +2988,46 @@ public:
             case 18: return blkFDIVS;
             case 20: return blkFSUBS;
             case 21: return blkFADDS;
+            case 24: return blkFRES;
             case 25: return blkFMULS;
             case 28: return blkFMSUBS;
             case 29: return blkFMADDS;
+            case 30: return blkFNMSUBS;
+            case 31: return blkFNMADDS;
             default: return nullptr;
             }
         case 63:
             en.x = (uint8)((opcode >> 6) & 31);
             switch ((opcode >> 1) & 31)
             {
+            case 0:
+                if ((rD & 3) == 0)
+                    return blkFCMPU<false>;
+                return nullptr; // Invalid CR field.
+            case 12: return blkFRSP;
+            case 15: return blkFPOperands<PPCInterpreter_truncateToInteger>;
             case 18: return blkFDIV;
             case 20: return blkFSUB;
             case 21: return blkFADD;
+            case 23: return blkFSEL;
             case 25: return blkFMUL;
+            case 26: return blkFRSQRTE;
             case 28: return blkFMSUB;
             case 29: return blkFMADD;
+            case 30: return blkFNMSUB;
+            case 31: return blkFNMADD;
             default:
                 switch ((opcode >> 1) & 0x3FF)
                 {
+                case 14: return blkFPOperands<PPCInterpreter_roundToInteger>;
+                case 32: en.d >>= 2; return blkFPCompare<PPCInterpreter_compareOrdered>;
+                case 38: return blkMTFSB1;
                 case 40: return blkFNEG;
                 case 72: return blkFMR;
+                case 136: return blkFNABS;
+                case 264: return blkFABS;
+                case 583: return blkMFFS;
+                case 711: en.imm = ppc_MTCRFMaskToPackedMask((opcode >> 17) & 255); return blkMTFSF;
                 default: return nullptr;
                 }
             }
@@ -2792,25 +3039,14 @@ public:
     static PPCBlockEntry decodeEntry(uint32 opcode, uint32 addr, PPCBlockTerm& term)
     {
         PPCBlockEntry en{};
-        const PPCLegacyOp legacy = legacyHandler(opcode, term);
-        if (term != PPCBlockTerm::Generic)
+        if (PPCBlockFn handler = decodeBlockHandler(opcode, addr, en, term))
         {
-            if (PPCBlockFn fast = fastHandler(opcode, addr, en))
-            {
-                en.fn = fast;
-                return en;
-            }
-        }
-        if (term == PPCBlockTerm::BCX || term == PPCBlockTerm::BX ||
-            term == PPCBlockTerm::BCLRX || term == PPCBlockTerm::BCCTR)
-        {
-            term = PPCBlockTerm::Generic;
-            en.imm = opcode;
-            en.fn = blkGenericTerm<blockFallbackStep>;
+            en.fn = handler;
             return en;
         }
-        en.imm = opcode;
-        en.fn = term == PPCBlockTerm::Generic ? legacy.terminator : legacy.direct;
+        // Unrecognized encodings still use the classic diagnostic path.
+        term = PPCBlockTerm::Generic;
+        en.fn = blkGenericTerm<blockFallbackStep>;
         return en;
     }
 
@@ -2951,10 +3187,12 @@ public:
                 first.fn = blkLI_Pair<true>;
             else if (first.fn == blkLI && first.d == second.a && second.fn == blkADDI)
                 first.fn = blkLI_Pair<false>;
-            else if (first.fn == blkADDI && first.d == second.a && second.fn == blkLWZ)
+            else if (first.fn == blkADDI && first.d == second.a && second.fn == blkIntegerLoad<4, false, false, false>)
                 first.fn = blkADDI_Mem<false>;
-            else if (first.fn == blkADDI && first.d == second.a && second.fn == blkSTW)
+            else if (first.fn == blkADDI && first.d == second.a && second.fn == blkIntegerStore<4, false, false, false>)
                 first.fn = blkADDI_Mem<true>;
+            else if (first.fn == blkMFLR && first.d == second.d && second.fn == blkIntegerStore<4, false, false, false>)
+                first.fn = blkMFLR_STW;
             else
                 continue;
             ++i;
@@ -3268,6 +3506,7 @@ public:
         uint32 prevFallthrough = 0; // address right after prev, picks which of its links a newly found successor goes into
         uint32 myGeneration = 0;
         PPCBlockCtx ctx{};
+        ctx.threadState = ts;
 
         while (hCPU->remainingCycles > 0)
         {
@@ -3284,6 +3523,9 @@ public:
                 // the cache may have been resized
                 table = s_blockTable;
                 pool = s_blockPool;
+                ctx.table = table;
+                ctx.pool = pool;
+                ctx.generation = myGeneration;
                 prev = &ts->linkScratch;
                 prevFallthrough = 0;
             }
@@ -3296,22 +3538,23 @@ public:
             PPCBlockDesc desc = slot->desc.load(std::memory_order_acquire);
             if (PPCBlockDesc_key(desc) != key) [[unlikely]]
             {
-                slot = PPCBlockCache_targetLookup(table, ts->targetSlots, ip);
-                if (!slot)
-                    slot = PPCBlockCache_lookup(ip);
+                slot = PPCBlockCache_targetLookup(table, ts->targetSlots, ip, desc);
                 if (!slot)
                 {
-                    PPCBlockDesc decoded = 0;
-                    if (PPCBlockCache_tableFull()) [[unlikely]]
-                        PPCBlockCache_onFull("table full", myGeneration);
-                    else if (const PPCBlockDesc predecoded = PPCPredecode_lookup(ip))
-                        decoded = importPredecodedBlock(predecoded, ip);
-                    else
-                        decoded = decodeBlock(hCPU, ip);
-                    slot = decoded ? PPCBlockCache_publish(ip, decoded) : nullptr;
+                    slot = PPCBlockCache_lookup(ip);
+                    if (!slot)
+                    {
+                        PPCBlockDesc decoded = 0;
+                        if (PPCBlockCache_tableFull()) [[unlikely]]
+                            PPCBlockCache_onFull("table full", myGeneration);
+                        else if (const PPCBlockDesc predecoded = PPCPredecode_lookup(ip))
+                            decoded = importPredecodedBlock(predecoded, ip);
+                        else
+                            decoded = decodeBlock(hCPU, ip);
+                        slot = decoded ? PPCBlockCache_publish(ip, decoded) : nullptr;
+                    }
+                    desc = slot ? slot->desc.load(std::memory_order_acquire) : 0;
                 }
-
-                desc = slot ? slot->desc.load(std::memory_order_acquire) : 0;
 
                 if (PPCBlockDesc_key(desc) != key) [[unlikely]]
                 {
@@ -3349,14 +3592,8 @@ public:
 
             hCPU->remainingCycles -= (sint32)count;
 
-            ctx.targetSlots = ts->targetSlots;
-            ctx.table = table;
-            ctx.pool = pool;
-            ctx.firstEntry = pool + PPCBlockDesc_firstEntry(desc);
             ctx.slot = slot;
-            ctx.blockStart = ip;
-            ctx.blockCount = count;
-            ctx.generation = myGeneration;
+            ctx.blockFallthrough = ip + count * 4;
             ctx.genericExit = false;
             
             const PPCBlockEntry* e = pool + PPCBlockDesc_firstEntry(desc);
@@ -3382,7 +3619,7 @@ public:
 
             // carry on from the last block of the chain, a miss there links its successor
             prev = ctx.slot;
-            prevFallthrough = ctx.blockStart + ctx.blockCount * 4;
+            prevFallthrough = ctx.blockFallthrough;
         }
 
         ts->ack.store(0, std::memory_order_release);
@@ -3393,6 +3630,7 @@ public:
 #undef PPC_BLOCK_ADVANCE
 #undef PPC_BLOCK_NEXT
 #undef PPC_BLOCK_EXIT
+#undef PPC_BLOCK_CHAIN
 
 };
 

@@ -52,7 +52,6 @@ class MetalView: UIView {
         metalLayer.presentsWithTransaction = false
         metalLayer.backgroundColor = UIColor.black.cgColor
         metalLayer.isOpaque = true
-        metalLayer.setValue(true, forKey: "allowsCALayerCapture")
         
         if !observingCaptureChanges {
             NotificationCenter.default.addObserver(

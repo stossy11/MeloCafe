@@ -14,6 +14,7 @@
 #include "util/Fiber/Fiber.h"
 
 #include "util/helpers/helpers.h"
+#include "util/helpers/ThreadQoS.h"
 
 #ifdef __arm64__
 #if defined(__clang__)
@@ -73,6 +74,10 @@ namespace coreinit
 
 	thread_local uint32 t_assignedCoreIndex;
 	thread_local Fiber* t_schedulerFiber;
+#ifdef __APPLE__
+	// The override belongs to the host thread, since guest fibers can migrate.
+	thread_local ScopedThreadQoS t_guestThreadQoS(false);
+#endif
 
 	struct OSHostThread
 	{
@@ -1064,6 +1069,10 @@ namespace coreinit
 
 		OSHostThread* hostThread = s_threadToFiber.find(thread)->second;
 		hostThread->selectedCore = coreIndex;
+#ifdef __APPLE__
+		const auto* mainThread = OSGetDefaultThread(1);
+		t_guestThreadQoS.SetEnabled(thread->effectivePriority <= mainThread->basePriority);
+#endif
 		Fiber::Switch(hostThread->m_fiber);
 	}
 
@@ -1246,6 +1255,9 @@ namespace coreinit
 	// this is necessary since we can't block in __OSThreadSwitchToNext() (__OSStoreThread + thread switch must happen inside same scheduler lock)
 	void __OSThreadCoreIdle(void* unusedParam)
 	{
+#ifdef __APPLE__
+		t_guestThreadQoS.SetEnabled(false);
+#endif
 		bool isMainCore = g_isMulticoreMode == false || t_assignedCoreIndex == 1;
 		sint32 coreIndex = t_assignedCoreIndex;
 		__OSUnlockScheduler();
@@ -1259,6 +1271,9 @@ namespace coreinit
 				{
 					cemu_assert_debug(nextThread->state == OSThread_t::THREAD_STATE::STATE_RUNNING);
 					__OSSwitchToThreadFiber(nextThread, coreIndex);
+#ifdef __APPLE__
+					t_guestThreadQoS.SetEnabled(false);
+#endif
 				}
 				__OSUnlockScheduler();
 			}
@@ -1294,6 +1309,9 @@ namespace coreinit
 
 		if (!sSchedulerActive.load(std::memory_order::relaxed))
 		{
+#ifdef __APPLE__
+			t_guestThreadQoS.SetEnabled(false);
+#endif
 			__OSUnlockScheduler();
 			Fiber::Switch(*t_schedulerFiber); // switch back to original thread entry for it to exit
 		}

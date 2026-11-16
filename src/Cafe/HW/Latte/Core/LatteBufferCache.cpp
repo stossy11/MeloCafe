@@ -2,6 +2,7 @@
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "util/ChunkedHeap/ChunkedHeap.h"
 #include "util/helpers/fspinlock.h"
+#include "util/helpers/ThreadQoS.h"
 #include "config/ActiveSettings.h"
 
 #include <atomic>
@@ -1484,6 +1485,7 @@ public:
 		auto newRange = new BufferCacheNode(rangeBegin, rangeEnd);
 		if (!newRange->allocateCacheMemory())
 		{
+			ScopedThreadQoS qos;
 			// not enough memory available, try to drop ram-only ranges from the ones we replace
 			for (size_t i = 0; i < overlappingObjects.size(); i++)
 			{

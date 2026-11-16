@@ -62,17 +62,21 @@ static void PPCInterpreter_MFTB(PPCInterpreter_t* hCPU, uint32 opcode)
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
+static void PPCInterpreter_executeTW(PPCInterpreter_t* hCPU, uint32 trap)
+{
+    const uint32 to = trap >> 5;
+    const uint32 kind = trap & 31;
+    cemu_assert_debug(to == 0);
+    if (to != 0)
+        PPCInterpreter_nextInstruction(hCPU);
+
+    if (kind == DEBUGGER_BP_T_DEBUGGER)
+        debugger_enterTW(hCPU);
+    else if (kind == DEBUGGER_BP_T_GDBSTUB)
+        g_gdbstub->HandleTrapInstruction(hCPU);
+}
+
 static void PPCInterpreter_TW(PPCInterpreter_t* hCPU, uint32 opcode)
 {
-	sint32 to, rA, rB;
-	PPC_OPC_TEMPL_X(opcode, to, rA, rB);
-
-	cemu_assert_debug(to == 0);
-	if(to != 0)
-		PPCInterpreter_nextInstruction(hCPU);
-
-    if (rA == DEBUGGER_BP_T_DEBUGGER)
-	    debugger_enterTW(hCPU);
-    else if (rA == DEBUGGER_BP_T_GDBSTUB)
-        g_gdbstub->HandleTrapInstruction(hCPU);
+    PPCInterpreter_executeTW(hCPU, (opcode >> 16) & 1023);
 }

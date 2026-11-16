@@ -1596,7 +1596,7 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
         return;
 
     const bool usesVertexStreamout = !usesGeometryShader && vertexShader->hasStreamoutBufferWrite;
-    bool fetchVertexManually = usesGeometryShader || usesVertexStreamout || fetchShader->mtlFetchVertexManually;
+    bool fetchVertexManually = usesGeometryShader || usesVertexStreamout || fetchShader->NeedsManualFetchMtl(LatteGPUState.contextRegister);
 
 
     PrepareOcclusionQueryDraw();
@@ -1699,8 +1699,10 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
             return;
         }
     }
-
-    if (!m_argumentBufferTier || m_argumentBufferTier == MTL::ArgumentBuffersTier1) {
+    
+    
+    if (!fetchVertexManually || vertexShader->resourceMapping.argumentBufferBindingPoint < 0)
+    {
         for (const auto& group : fetchShader->bufferGroups)
         {
             const uint32 slot = group.attributeBufferIndex;
@@ -1709,46 +1711,22 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
                 rejectDraw();
                 return;
             }
-            const uint32 stride = (LatteGPUState.contextRegister[mmSQ_VTX_ATTRIBUTE_BLOCK_START + slot * 7 + 2] >> 11) & 0xffff;
-            
+            const uint32 stride = group.getCurrentBufferStride(LatteGPUState.contextRegister);
             const uint32 fetchStride = fetchVertexManually ? stride : Align(stride, 4);
-            uint64 required = 0;
-            for (sint32 j = 0; j < group.attribCount; ++j)
-            {
-                const auto& attr = group.attrib[j];
-                if (vertexShader->resourceMapping.attributeMapping[attr.semanticId] == uint32(-1))
-                    continue;
-                const uint32 attributeSize = GetMtlVertexFormatSize(attr.format);
-                if (!attributeSize)
-                {
-                    rejectDraw();
-                    return;
-                }
-                uint32 lastIndex = 0;
-                if (stride && attr.fetchType == LatteConst::VertexFetchType2::VERTEX_DATA)
-                    lastIndex = maxVertexIndex;
-                else if (stride && attr.fetchType == LatteConst::VertexFetchType2::INSTANCE_DATA)
-                {
-                    const uint64 lastInstance = uint64(baseInstance) + instanceCount - 1;
-                    if (lastInstance > UINT32_MAX)
-                    {
-                        rejectDraw();
-                        return;
-                    }
-                    lastIndex = static_cast<uint32>(lastInstance);
-                }
-                required = std::max(required, MetalVertexBufferBounds::AttributeEnd(
-                                                                                    lastIndex, fetchStride, attr.offset, attributeSize));
-            }
+            const uint64 required = group.getRequiredBufferSizeMtl(fetchStride, maxVertexIndex, baseInstance,
+                instanceCount, vertexShader->resourceMapping.attributeMapping);
             if (!required)
                 continue;
             auto buffer = m_state.m_vertexBuffers[slot];
             const auto offset = m_state.m_vertexBufferOffsets[slot];
             if (!buffer || !MetalVertexBufferBounds::Fits(required,
-                                                          m_state.m_vertexBufferSizes[slot], offset, buffer->length()))
+                    m_state.m_vertexBufferSizes[slot], offset, buffer->length()))
             {
-                //cemuLog_log(LogType::Force, "Metal: rejecting draw with out-of-bounds vertex fetch (slot {}, max vertex {}, required {} bytes, bound {} bytes)",
-                //    slot, maxVertexIndex, required, m_state.m_vertexBufferSizes[slot]);
+                static uint64 rejectedVertexFetches = 0;
+                if ((rejectedVertexFetches++ % 256) == 0)
+                    cemuLog_log(LogType::Force, "Metal: rejecting out-of-bounds vertex fetch (slot {}, manual {}, stride {}, fetch stride {}, max vertex {}, base instance {}, instances {}, required {}, bound {}, offset {}, buffer length {})",
+                        slot, fetchVertexManually, stride, fetchStride, maxVertexIndex, baseInstance, instanceCount,
+                        required, m_state.m_vertexBufferSizes[slot], offset, buffer ? buffer->length() : 0);
                 rejectDraw();
                 return;
             }
@@ -2098,16 +2076,13 @@ bool MetalRenderer::draw_updateVertexBuffersDirectAccess(uint32 minIndex, uint32
         if (bufferAddress == MPTR_NULL) [[unlikely]]
             bufferAddress = m_memoryManager->GetImportedMemBaseAddress();
 
-        uint64 requiredSize = 0;
-        if (bufferGroup.hasVtxIndexAccess)
-            requiredSize = uint64(bufferStride) * (uint64(maxIndex) + 1) + bufferGroup.maxOffset;
-        if (bufferGroup.hasInstanceIndexAccess)
-        {
-            uint64 instanceBufferSize = uint64(bufferStride) * (uint64(baseInstance) + instanceCount + 1) + bufferGroup.maxOffset;
-            requiredSize = std::max(requiredSize, instanceBufferSize);
-        }
-        if (requiredSize == 0 || bufferStride == 0)
-            requiredSize += 128;
+        const auto* vertexShader = LatteSHRC_GetActiveVertexShader();
+        if (!vertexShader || bufferIndex >= MAX_MTL_VERTEX_BUFFERS)
+            return false;
+        const uint64 requiredSize = bufferGroup.getRequiredBufferSizeMtl(bufferStride, maxIndex, baseInstance,
+            instanceCount, vertexShader->resourceMapping.attributeMapping);
+        if (!requiredSize)
+            continue;
 
         // Reject overflowing guest ranges before narrowing or copying vertex data.
         if (requiredSize > 0x7FFFFFFFull || uint64(bufferAddress) + requiredSize + 0x3ff > 0x7FFFFFFFull) {
@@ -3206,7 +3181,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         const LatteFetchShader* fetchShader = LatteSHRC_GetActiveFetchShader();
         const bool fetchVertexManually =
         usesGeometryShader ||
-        (fetchShader && fetchShader->mtlFetchVertexManually) ||
+        (fetchShader && fetchShader->NeedsManualFetchMtl(LatteGPUState.contextRegister)) ||
         (shader->hasStreamoutBufferWrite && !usesGeometryShader);
         if (fetchVertexManually && fetchShader)
         {

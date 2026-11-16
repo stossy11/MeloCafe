@@ -9,8 +9,25 @@ import Foundation
 
 class CemuManager {
     private static let fileManager = FileManager.default
+    private static var initialization: Task<Void, Never>?
 
-    static func initialize() {
+    static func initialize() async {
+        if let initialization {
+            await initialization.value
+            return
+        }
+
+        let task = Task {
+            if !(await RamDonor.shared.prepare()), !(await GuestSwap.prepare()) {
+                print("Using standard guest memory.")
+            }
+            initializeCore()
+        }
+        initialization = task
+        await task.value
+    }
+
+    private static func initializeCore() {
         if !fileManager.fileExists(atPath: URL.romsURL.path) {
             do {
                 try fileManager.createDirectory(at: .romsURL, withIntermediateDirectories: true, attributes: nil)
@@ -22,8 +39,6 @@ class CemuManager {
         let documents = URL.documentsDirectory
 
         let executable = Bundle.main.executablePath
-        
-        RamDonor.prepare(bytes: 4 * 1024 * 1024 * 1024)
         
         //redirectStdIOToFile()
 

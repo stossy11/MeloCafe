@@ -80,12 +80,62 @@ bool PPCRecompiler_isDualMapJITEnabled()
     return s_dualMapJITEnabled;
 }
 
-// Apple has been ragebaiting me over AppStore submission lol
-#if DIST_APPSTORE
-bool checkDebugged() {
-    return false;
+static int PPCRecompiler_readBoolEnvVar(const char* name)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0')
+    {
+        return -1;
+    }
+
+    if (strcmp(value, "1") == 0)
+    {
+        return 1;
+    }
+
+    if (strcmp(value, "0") == 0)
+    {
+        return 0;
+    }
+
+    return -1;
 }
-#elif defined(__APPLE__)
+
+// Apple has been ragebaiting me over AppStore submission lol
+// replace csops with public API using P_TRACED
+#if defined(__APPLE__)
+bool checkDebuggedSysCtl() {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    info.kp_proc.p_flag = 0;
+
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
+        return false;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+
+bool checkDebugged() {
+    if (PPCRecompiler_readBoolEnvVar("MELOCAFE_DEBUG") == 1)
+    {
+        return true;
+    }
+    else
+    {
+        bool debugged = checkDebuggedSysCtl();
+        setenv("MELOCAFE_DEBUG", debugged ? "1" : "0", 1);
+        return debugged;
+    }
+}
+#else
+bool checkDebugged() {
+    return true;
+}
+#endif
+// old code using csops
+/*
 extern "C" int csops(pid_t pid, int ops, void* useraddr, size_t usersize);
 
 constexpr uint32_t CS_DEBUGGED = 0x10000000;
@@ -96,11 +146,7 @@ bool checkDebugged() {
     int result = csops(getpid(), 0, &flags, sizeof(flags));
     return (result == 0) && ((flags & CS_DEBUGGED) != 0);
 }
-#else
-bool checkDebugged() {
-    return true;
-}
-#endif
+ */
 
 #if defined(__APPLE__) && defined(__aarch64__)
 
@@ -131,26 +177,6 @@ void* BreakMarkJITMapping(size_t bytes) {
 
 }
 
-static int PPCRecompiler_readBoolEnvVar(const char* name)
-{
-    const char* value = std::getenv(name);
-    if (value == nullptr || *value == '\0')
-    {
-        return -1;
-    }
-
-    if (strcmp(value, "1") == 0)
-    {
-        return 1;
-    }
-
-    if (strcmp(value, "0") == 0)
-    {
-        return 0;
-    }
-
-    return -1;
-}
 
 static int PPCRecompiler_getAppleOsMajorVersion()
 {
@@ -205,6 +231,9 @@ DualMapRegion PPCRecompiler_allocateDualMap(size_t size)
     if (PPCRecompiler_readTXMEnvVar())
     {
         rxPtr = BreakGetJITMapping(nullptr, size);
+        
+        if (rxPtr == 0)
+            return r;
     }
 
     if (!rxPtr)
@@ -216,7 +245,7 @@ DualMapRegion PPCRecompiler_allocateDualMap(size_t size)
     vm_address_t rwAddr = 0;
     vm_prot_t curProt = VM_PROT_NONE, maxProt = VM_PROT_NONE;
 
-    kern_return_t kr = vm_remap(
+    kern_return_t kr = vm_remap_new(
         mach_task_self(), &rwAddr, (vm_size_t)size, 0, VM_FLAGS_ANYWHERE,
         mach_task_self(), (vm_address_t)rxPtr, FALSE,
         &curProt, &maxProt, VM_INHERIT_NONE);
@@ -1521,6 +1550,8 @@ bool PPCRecompiler_Init26() {
             MemMapper::AllocateMemory(&(ppcRecompilerInstanceData->_x64XMM_xorNegateMaskBottom), sizeof(PPCRecompilerInstanceData_t) - offsetof(PPCRecompilerInstanceData_t, _x64XMM_xorNegateMaskBottom), MemMapper::PAGE_PERMISSION::P_RW, true);
             
             PPCRecompilerAArch64Gen_generateRecompilerInterfaceFunctions();
+            
+            PPCRecompiler_finishJitMappingSession();
         }
     }
     catch (const std::exception& e)
@@ -1529,9 +1560,12 @@ bool PPCRecompiler_Init26() {
             PPCCore_InitializePointer(false);
             ppcRecompilerEnabled = false;
         } else { throw e; }
+    } catch (...) {
+        if (ActiveSettings::GetCPUMode() == CPUMode::Auto) {
+            PPCCore_InitializePointer(false);
+            ppcRecompilerEnabled = false;
+        }
     }
-    
-    PPCRecompiler_finishJitMappingSession();
     
     return ppcRecompilerInited;
 }
@@ -1597,7 +1631,14 @@ void PPCRecompiler_init()
     bool init26 = false;
     if (s_dualMapJITEnabled && !ppcRecompilerInited)
     {
-        init26 = PPCRecompiler_Init26();
+        try
+        {
+            init26 = PPCRecompiler_Init26();
+        }
+        catch (...)
+        {
+            
+        }
     }
     
     if (!init26) {

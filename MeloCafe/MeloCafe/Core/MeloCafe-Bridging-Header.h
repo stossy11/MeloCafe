@@ -11,7 +11,6 @@
 #include "../../../src/config/CemuConfigWrapper.h"
 #include "../../../src/config/GraphicPackWrapper.h"
 #include "../../../src/gui/uikit/EmulatedUSBDevices.h"
-#include "Memory/MLXRamDonor.h"
 
 void CemuUIKit_UpdateMainWindowSize(CGFloat width, CGFloat height, CGFloat scale);
 
@@ -80,7 +79,6 @@ void Cemu_FreeGameIcon(GameIconResult* icon);
 bool CemuInitJIT();
 
 bool offer_donated_memory(void* base, uint64_t size);
-bool withdraw_donated_memory(void);
 
 extern size_t g_available_memory;
 

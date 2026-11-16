@@ -4,6 +4,7 @@
 #include "config/CemuConfig.h"
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
 #include "util/helpers/helpers.h"
+#include "util/helpers/ThreadQoS.h"
 
 #include <imgui.h>
 #include "imgui/imgui_extension.h"
@@ -102,6 +103,7 @@ void Renderer::QueueRenderWorkerJob(std::function<void()> job)
     if (!m_renderWorkerThread.joinable())
     {
         lock.unlock();
+        ScopedThreadQoS qos;
         job();
         return;
     }
@@ -126,7 +128,8 @@ void Renderer::WaitRenderWorkerIdle()
 void Renderer::RenderWorkerThread(std::string threadName)
 {
     SetThreadName(threadName.c_str());
-    
+    ScopedThreadQoS qos;
+
     while (true)
     {
         std::function<void()> job;

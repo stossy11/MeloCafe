@@ -178,7 +178,7 @@ void memory_init()
     memory_base = (uint8*)s_donatedMemory.base;
     
     if (memory_base)
-        cemuLog_log(LogType::Force, "Donated Memory Enabled: {}, size {:#x}", s_donatedMemory.base, s_donatedMemory.size);
+        cemuLog_log(LogType::Force, "External guest memory enabled: {}, size {:#x}", s_donatedMemory.base, s_donatedMemory.size);
         
 	if (!memory_base)
 		memory_base = (uint8*)MemMapper::ReserveMemory(nullptr, size_t{0x100000000ULL}, MemMapper::PAGE_PERMISSION::P_RW);
@@ -218,7 +218,7 @@ void memory_init()
 #endif
 	if( !memory_base )
 	{
-		debug_printf("memory_init(): Unable to reserve guest memory regions\n");
+		printf("memory_init(): Unable to reserve guest memory regions\n");
 		debugBreakpoint();
 		WindowSystem::ShowErrorDialog(_tr("Unable to reserve guest memory regions"), _tr("Error"));
 		exit(-1);

@@ -30,6 +30,10 @@ struct LatteParsedFetchShaderBufferGroup_t
 	bool hasInstanceIndexAccess{};
 
 	uint32 getCurrentBufferStride(uint32* contextRegister) const;
+#ifdef ENABLE_METAL
+	uint64 getRequiredBufferSizeMtl(uint32 stride, uint32 maxVertexIndex, uint32 baseInstance,
+		uint32 instanceCount, const sint8* attributeMapping) const;
+#endif
 };
 
 struct LatteFetchShader
@@ -46,9 +50,6 @@ struct LatteFetchShader
 	// Vulkan
 	uint64 vkPipelineHashFragment{}; // hash of all fetch shader state that influences the Vulkan graphics pipeline
 
-	// Metal
-	bool mtlFetchVertexManually{};
-
 	// cache info
 	CacheHash m_cacheHash{};
 	bool m_isRegistered{}; // if true, fetch shader is referenced by cache (RegisterInCache() succeeded)
@@ -56,7 +57,7 @@ struct LatteFetchShader
 	void CalculateFetchShaderVkHash();
 
 #ifdef ENABLE_METAL
-	void CheckIfVerticesNeedManualFetchMtl(uint32* contextRegister);
+	bool NeedsManualFetchMtl(const uint32* contextRegister) const;
 #endif
 
 	uint64 getVkPipelineHashFragment() const { return vkPipelineHashFragment; };

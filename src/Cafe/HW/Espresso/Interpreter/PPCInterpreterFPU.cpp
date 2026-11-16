@@ -219,13 +219,8 @@ void PPCInterpreter_FSEL(PPCInterpreter_t* hCPU, uint32 Opcode)
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-void PPCInterpreter_FCTIWZ(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_truncateToInteger(PPCInterpreter_t* hCPU, uint32 frD, uint32 frB)
 {
-	FPUCheckAvailable();
-	int frD, frA, frB;
-	PPC_OPC_TEMPL_X(Opcode, frD, frA, frB);
-	PPC_ASSERT(frA==0);
-
 	double b = hCPU->fpr[frB].fpr;
 	uint64 v;
 	if (b > (double)0x7FFFFFFF)
@@ -244,18 +239,18 @@ void PPCInterpreter_FCTIWZ(PPCInterpreter_t* hCPU, uint32 Opcode)
 	hCPU->fpr[frD].guint = 0xFFF8000000000000ULL | v;
 	if (v == 0 && ((*(uint64*)&b) >> 63))
 		hCPU->fpr[frD].guint |= 0x100000000ull;
+}
 
+void PPCInterpreter_FCTIWZ(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 frD = (opcode >> 21) & 31;
+	const uint32 frB = (opcode >> 11) & 31;
+	PPCInterpreter_truncateToInteger(hCPU, frD, frB);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-void PPCInterpreter_FCTIW(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_roundToInteger(PPCInterpreter_t* hCPU, uint32 frD, uint32 frB)
 {
-	FPUCheckAvailable();
-
-	int frD, frA, frB;
-	PPC_OPC_TEMPL_X(Opcode, frD, frA, frB);
-	PPC_ASSERT(frA==0);
-
 	double b = hCPU->fpr[frB].fpr;
 	uint64 v;
 	if (b > (double)0x7FFFFFFF)
@@ -280,7 +275,13 @@ void PPCInterpreter_FCTIW(PPCInterpreter_t* hCPU, uint32 Opcode)
 	hCPU->fpr[frD].guint = 0xFFF8000000000000ULL | v;
 	if (v == 0 && ((*(uint64*)&b) >> 63))
 		hCPU->fpr[frD].guint |= 0x100000000ull;
+}
 
+void PPCInterpreter_FCTIW(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 frD = (opcode >> 21) & 31;
+	const uint32 frB = (opcode >> 11) & 31;
+	PPCInterpreter_roundToInteger(hCPU, frD, frB);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
@@ -491,18 +492,9 @@ void PPCInterpreter_MFFS(PPCInterpreter_t* hCPU, uint32 Opcode)
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-void PPCInterpreter_MTFSF(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_writeFPSCR(PPCInterpreter_t* hCPU, uint32 frB, uint32 mask)
 {
-	FPUCheckAvailable();
-
-	int frB;
-	uint32 fm, FM;
-	PPC_OPC_TEMPL_XFL(Opcode, frB, fm);
-	FM = ((fm&0x80)?0xf0000000:0)|((fm&0x40)?0x0f000000:0)|((fm&0x20)?0x00f00000:0)|((fm&0x10)?0x000f0000:0)|
-	     ((fm&0x08)?0x0000f000:0)|((fm&0x04)?0x00000f00:0)|((fm&0x02)?0x000000f0:0)|((fm&0x01)?0x0000000f:0);
-	hCPU->fpscr = (hCPU->fpr[frB].guint & FM) | (hCPU->fpscr & ~FM);
-
-	PPC_ASSERT((Opcode & PPC_OPC_RC) != 0); // update CR1 flags
+	hCPU->fpscr = (hCPU->fpr[frB].guint & mask) | (hCPU->fpscr & ~mask);
 
 	static bool logFPSCRWriteOnce = false;
 	if( logFPSCRWriteOnce == false )
@@ -510,6 +502,13 @@ void PPCInterpreter_MTFSF(PPCInterpreter_t* hCPU, uint32 Opcode)
 		cemuLog_log(LogType::Force, "Unsupported write to FPSCR");
 		logFPSCRWriteOnce = true;
 	}
+}
+
+void PPCInterpreter_MTFSF(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 frB = (opcode >> 11) & 31;
+	const uint32 mask = ppc_MTCRFMaskToPackedMask((opcode >> 17) & 255);
+	PPCInterpreter_writeFPSCR(hCPU, frB, mask);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
@@ -635,14 +634,8 @@ void PPCInterpreter_FNMSUBS(PPCInterpreter_t* hCPU, uint32 Opcode)
 
 // Compare
 
-void PPCInterpreter_FCMPO(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_compareOrdered(PPCInterpreter_t* hCPU, uint32 crfD, uint32 frA, uint32 frB)
 {
-	FPUCheckAvailable();
-	
-	int crfD, frA, frB;
-	PPC_OPC_TEMPL_X(Opcode, crfD, frA, frB);
-	crfD >>= 2;
-
 	uint32 c;
 	if(IS_NAN(hCPU->fpr[frA].guint) || IS_NAN(hCPU->fpr[frB].guint))
 	{
@@ -668,7 +661,14 @@ void PPCInterpreter_FCMPO(PPCInterpreter_t* hCPU, uint32 Opcode)
 		hCPU->fpscr |= FPSCR_VXSNAN;
 	else if (!(hCPU->fpscr & FPSCR_VE) || IS_QNAN (hCPU->fpr[frA].guint) || IS_QNAN (hCPU->fpr[frB].guint))
 		hCPU->fpscr |= FPSCR_VXVC;
+}
 
+void PPCInterpreter_FCMPO(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 crfD = (opcode >> 23) & 7;
+	const uint32 frA = (opcode >> 16) & 31;
+	const uint32 frB = (opcode >> 11) & 31;
+	PPCInterpreter_compareOrdered(hCPU, crfD, frA, frB);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 

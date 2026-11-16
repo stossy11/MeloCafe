@@ -9,52 +9,41 @@
 #include <float.h>
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 
-void PPCInterpreter_MFMSR(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_MFMSR(PPCInterpreter_t* hCPU, uint32 opcode)
 {
 	cemuLog_logDebug(LogType::Force, "Rare instruction: MFMSR");
 	if (hCPU->sprExtended.msr & MSR_PR)
-	{
-		PPC_ASSERT(true);
 		return;
-	}
-	int rD, rA, rB;
-	PPC_OPC_TEMPL_X(Opcode, rD, rA, rB);
-	hCPU->gpr[rD] = hCPU->sprExtended.msr;
-
+	const uint32 reg = (opcode >> 21) & 31;
+	hCPU->gpr[reg] = hCPU->sprExtended.msr;
 	PPCInterpreter_nextInstruction(hCPU);
-
 }
 
-void PPCInterpreter_MTMSR(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_writeMSR(PPCInterpreter_t* hCPU, uint32 reg)
 {
 	cemuLog_logDebug(LogType::Force, "Rare instruction: MTMSR");
 	if (hCPU->sprExtended.msr & MSR_PR)
-	{
-		PPC_ASSERT(true);
 		return;
-	}
-	int rS, rA, rB;
-	PPC_OPC_TEMPL_X(Opcode, rS, rA, rB);
-
-	hCPU->sprExtended.msr = hCPU->gpr[rS];
+	hCPU->sprExtended.msr = hCPU->gpr[reg];
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-void PPCInterpreter_MTFSB1X(PPCInterpreter_t* hCPU, uint32 Opcode)
+void PPCInterpreter_MTMSR(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	PPCInterpreter_writeMSR(hCPU, (opcode >> 21) & 31);
+}
+
+void PPCInterpreter_setFPSCRBit(PPCInterpreter_t* hCPU, uint32 bit)
 {
 	cemuLog_logDebug(LogType::Force, "Rare instruction: MTFSB1X");
-	int crbD, n1, n2;
-	PPC_OPC_TEMPL_X(Opcode, crbD, n1, n2);
-	if (crbD != 1 && crbD != 2) 
-	{
-		hCPU->fpscr |= 1 << (31 - crbD);
-	}
-	if (Opcode & PPC_OPC_RC) 
-	{
-		// update cr1 flags
-		PPC_ASSERT(true);
-	}
+	if (bit != 1 && bit != 2)
+		hCPU->fpscr |= 1u << (31 - bit);
+}
 
+void PPCInterpreter_MTFSB1X(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 bit = (opcode >> 21) & 31;
+	PPCInterpreter_setFPSCRBit(hCPU, bit);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
@@ -93,14 +82,8 @@ void PPCInterpreter_MTCRF(PPCInterpreter_t* hCPU, uint32 Opcode)
 	PPCInterpreter_nextInstruction(hCPU);
 }
 
-void PPCInterpreter_MCRXR(PPCInterpreter_t* hCPU, uint32 Opcode)
-{	
-	// used in Dont Starve: Giant Edition
-	// also used frequently by Web Browser (webkit?)
-	uint32 cr;
-	cr = (Opcode >> (31 - 8)) & 7;
-	cr >>= 2;
-
+void PPCInterpreter_moveXERToCR(PPCInterpreter_t* hCPU, uint32 cr)
+{
 	uint32 xer = PPCInterpreter_getXER(hCPU);
 	uint32 xerBits = (xer >> 28) & 0xF;
 
@@ -112,6 +95,12 @@ void PPCInterpreter_MCRXR(PPCInterpreter_t* hCPU, uint32 Opcode)
 	// reset copied bits
 	PPCInterpreter_setXER(hCPU, xer&~0xF0000000);
 
+}
+
+void PPCInterpreter_MCRXR(PPCInterpreter_t* hCPU, uint32 opcode)
+{
+	const uint32 cr = ((opcode >> 23) & 7) >> 2;
+	PPCInterpreter_moveXERToCR(hCPU, cr);
 	PPCInterpreter_nextInstruction(hCPU);
 }
 

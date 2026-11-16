@@ -1,6 +1,7 @@
 #include "iosu_kernel.h"
 #include "util/helpers/fspinlock.h"
 #include "util/helpers/helpers.h"
+#include "util/helpers/TimedWorkEvent.h"
 #include "Cafe/OS/libs/coreinit/coreinit_IPC.h"
 #include "util/highresolutiontimer/HighResolutionTimer.h"
 
@@ -167,8 +168,9 @@ namespace iosu
 		/* timer */
 
 		std::mutex sTimerMutex;
-		std::condition_variable sTimerCV;
-		std::atomic_bool sTimerThreadStop;
+		TimedWorkEvent sTimerEvent;
+		std::optional<HRTick> sTimerWaitDeadline;
+		bool sTimerThreadStop = false;
 
 		struct IOSTimer
 		{
@@ -193,9 +195,24 @@ namespace iosu
 		};
 		std::set<IOSTimerId, decltype(sTimerSortComparator)> sTimerByFireTime;
 
+		HRTick IOS_GetNextTimerDeadline()
+		{
+			if (sTimerByFireTime.empty())
+				return std::numeric_limits<HRTick>::max();
+			return sTimers[*sTimerByFireTime.begin()].nextFire;
+		}
+
+		void IOS_WakeTimerThread()
+		{
+			if (sTimerWaitDeadline)
+			{
+				sTimerWaitDeadline.reset();
+				sTimerEvent.Notify();
+			}
+		}
+
 		IOSTimer& IOS_GetFreeTimer()
 		{
-			cemu_assert_debug(!sTimerMutex.try_lock()); // lock must be held by current thread
 			if (sTimersFreeHandles.empty())
 				return sTimers.emplace_back();
 			IOSTimerId timerId = sTimersFreeHandles.back();
@@ -205,7 +222,6 @@ namespace iosu
 
 		void IOS_TimerSetNextFireTime(IOSTimer& timer, HRTick nextFire)
 		{
-			cemu_assert_debug(!sTimerMutex.try_lock()); // lock must be held by current thread
 			IOSTimerId timerId = &timer - sTimers.data();
 			auto it = sTimerByFireTime.find(timerId);
 			if(it != sTimerByFireTime.end())
@@ -217,8 +233,10 @@ namespace iosu
 
 		void IOS_StopTimerInternal(IOSTimerId timerId)
 		{
-			cemu_assert_debug(!sTimerMutex.try_lock());
+			const auto removedDeadline = sTimers[timerId].nextFire;
 			IOS_TimerSetNextFireTime(sTimers[timerId], 0);
+			if (sTimerWaitDeadline == removedDeadline && IOS_GetNextTimerDeadline() != removedDeadline)
+				IOS_WakeTimerThread();
 		}
 
 		IOS_ERROR IOS_CreateTimer(uint32 startMicroseconds, uint32 repeatMicroseconds, uint32 queueId, uint32 message)
@@ -231,7 +249,8 @@ namespace iosu
 			timer.repeat = HighResolutionTimer::microsecondsToTicks(repeatMicroseconds);
 			IOS_TimerSetNextFireTime(timer, nextFire);
 			timer.isValid = true;
-			sTimerCV.notify_one();
+			if (sTimerWaitDeadline && nextFire < *sTimerWaitDeadline)
+				IOS_WakeTimerThread();
 			return (IOS_ERROR)(&timer - sTimers.data());
 		}
 
@@ -261,33 +280,41 @@ namespace iosu
 			std::unique_lock _l(sTimerMutex);
 			while (!sTimerThreadStop)
 			{
-				if (sTimerByFireTime.empty())
+				const HRTick now = HighResolutionTimer::now().getTick();
+				const auto waitStart = TimedWorkEvent::Clock::now();
+				const auto nextFire = IOS_GetNextTimerDeadline();
+				if (now >= nextFire)
 				{
-					sTimerCV.wait_for(_l, std::chrono::milliseconds(10000));
-					continue;
-				}
-				IOSTimerId timerId = *sTimerByFireTime.begin();
-				IOSTimer& timer = sTimers[timerId];
-				HRTick now = HighResolutionTimer::now().getTick();
-				if (now >= timer.nextFire)
-				{
-					if(timer.repeat == 0)
+					IOSTimer& timer = sTimers[*sTimerByFireTime.begin()];
+					if (timer.repeat == 0)
 						IOS_TimerSetNextFireTime(timer, 0);
 					else
-						IOS_TimerSetNextFireTime(timer, timer.nextFire + timer.repeat);
+						IOS_TimerSetNextFireTime(timer, nextFire + timer.repeat);
 					IOSMsgQueueId queueId = timer.queueId;
 					uint32 message = timer.message;
-					// fire timer
 					_l.unlock();
-					IOSMessage msg;
 					IOS_SendMessage(queueId, message, 1);
 					_l.lock();
 					continue;
 				}
-				else
+
+				auto deadline = TimedWorkEvent::Clock::time_point::max();
+				if (nextFire != std::numeric_limits<HRTick>::max())
 				{
-					sTimerCV.wait_for(_l, std::chrono::microseconds(HighResolutionTimer::ticksToMicroseconds(timer.nextFire - now)));
+#if BOOST_OS_MACOS || BOOST_OS_IOS
+					deadline = waitStart + std::chrono::nanoseconds(nextFire - now);
+#else
+					deadline = waitStart + std::chrono::microseconds(
+						HighResolutionTimer::ticksToMicroseconds(nextFire - now) + 1);
+#endif
 				}
+
+				const auto generation = sTimerEvent.Snapshot();
+				sTimerWaitDeadline = nextFire;
+				_l.unlock();
+				sTimerEvent.WaitUntil(generation, deadline);
+				_l.lock();
+				sTimerWaitDeadline.reset();
 			}
 		}
 
@@ -756,15 +783,21 @@ namespace iosu
 			{
 				_IPCInitDispatchablePool();
 				// start timer thread
-				sTimerThreadStop = false;
+				{
+					std::lock_guard lock(sTimerMutex);
+					sTimerThreadStop = false;
+				}
 				m_timerThread = std::thread(IOSTimerThread);
 			}
 
 			void SystemExit() override
 			{
 				// stop timer thread
-				sTimerThreadStop = true;
-				sTimerCV.notify_one();
+				{
+					std::lock_guard lock(sTimerMutex);
+					sTimerThreadStop = true;
+					IOS_WakeTimerThread();
+				}
 				m_timerThread.join();
 				// reset resources
 				// todo

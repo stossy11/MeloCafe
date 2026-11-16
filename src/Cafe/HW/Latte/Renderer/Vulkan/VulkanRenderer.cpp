@@ -2130,29 +2130,30 @@ void VulkanRenderer::InitFirstCommandBuffer()
 	m_state.resetCommandBufferState();
 }
 
+bool VulkanRenderer::IsFenceSignaled(VkFence fence) const
+{
+	const VkResult status = vkGetFenceStatus(m_logicalDevice, fence);
+	if (status == VK_NOT_READY)
+		return false;
+	if (status != VK_SUCCESS)
+		UnrecoverableError(fmt::format("vkGetFenceStatus failed: {}", status).c_str());
+	return true;
+}
+
 void VulkanRenderer::ProcessFinishedCommandBuffers()
 {
 	bool finishedCmdBuffers = false;
-	while (m_commandBufferSyncIndex != m_commandBufferIndex)
+	const auto submittedCount = m_numQueueSubmissions.load(std::memory_order_acquire);
+	while (m_commandBufferSyncIndex != m_commandBufferIndex && m_countCommandBufferFinished < submittedCount)
 	{
-		VkResult fenceStatus = vkGetFenceStatus(m_logicalDevice, m_cmd_buffer_fences[m_commandBufferSyncIndex]);
-		if (fenceStatus == VK_SUCCESS)
-		{
-			ProcessDestructionQueue();
-			m_uniformVarBufferReadIndex = m_cmdBufferUniformRingbufIndices[m_commandBufferSyncIndex];
-			m_commandBufferSyncIndex = (m_commandBufferSyncIndex + 1) % m_commandBuffers.size();
-			memoryManager->cleanupBuffers(m_countCommandBufferFinished);
-			m_countCommandBufferFinished++;
-			finishedCmdBuffers = true;
-			continue;
-		}
-		else if (fenceStatus == VK_NOT_READY)
-		{
-			// not signaled
+		if (!IsFenceSignaled(m_cmd_buffer_fences[m_commandBufferSyncIndex]))
 			break;
-		}
-		cemuLog_log(LogType::Force, "vkGetFenceStatus returned unexpected error {}", (sint32)fenceStatus);
-		cemu_assert_debug(false);
+		ProcessDestructionQueue();
+		m_uniformVarBufferReadIndex = m_cmdBufferUniformRingbufIndices[m_commandBufferSyncIndex];
+		m_commandBufferSyncIndex = (m_commandBufferSyncIndex + 1) % m_commandBuffers.size();
+		memoryManager->cleanupBuffers(m_countCommandBufferFinished);
+		m_countCommandBufferFinished++;
+		finishedCmdBuffers = true;
 	}
 	if (finishedCmdBuffers)
 	{
@@ -2163,17 +2164,12 @@ void VulkanRenderer::ProcessFinishedCommandBuffers()
 void VulkanRenderer::WaitForNextFinishedCommandBuffer()
 {
 	cemu_assert_debug(m_commandBufferSyncIndex != m_commandBufferIndex);
-	// wait on least recently submitted command buffer
-	VkResult result = vkWaitForFences(m_logicalDevice, 1, &m_cmd_buffer_fences[m_commandBufferSyncIndex], true, UINT64_MAX);
-	if (result == VK_TIMEOUT)
-	{
-		cemuLog_log(LogType::Force, "vkWaitForFences: Returned VK_TIMEOUT on infinite fence");
-	}
-	else if (result != VK_SUCCESS)
-	{
-		cemuLog_log(LogType::Force, "vkWaitForFences: Returned unhandled error {}", (sint32)result);
-	}
-	// process
+	// Ensure the render worker has submitted the fence before blocking on it.
+	if (m_countCommandBufferFinished >= m_numQueueSubmissions.load(std::memory_order_acquire))
+		WaitRenderWorkerIdle();
+	const VkResult result = vkWaitForFences(m_logicalDevice, 1, &m_cmd_buffer_fences[m_commandBufferSyncIndex], VK_TRUE, UINT64_MAX);
+	if (result != VK_SUCCESS)
+		UnrecoverableError(fmt::format("vkWaitForFences failed: {}", result).c_str());
 	ProcessFinishedCommandBuffers();
 }
 
@@ -2226,6 +2222,7 @@ void VulkanRenderer::SubmitCommandBuffer(VkSemaphore signalSemaphore, VkSemaphor
 		const VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, submittedFence);
 		if (result != VK_SUCCESS)
 			UnrecoverableError(fmt::format("failed to submit command buffer. Error {}", result).c_str());
+		m_numQueueSubmissions.fetch_add(1, std::memory_order_release);
 	});
 	m_numSubmittedCmdBuffers++;
 
@@ -2289,7 +2286,11 @@ uint64 VulkanRenderer::GetCurrentCommandBufferId() const
 
 bool VulkanRenderer::HasCommandBufferFinished(uint64 commandBufferId) const
 {
-	return m_countCommandBufferFinished > commandBufferId;
+	if (HasRetiredCommandBuffer(commandBufferId))
+		return true;
+	if (commandBufferId >= m_numQueueSubmissions.load(std::memory_order_acquire))
+		return false;
+	return IsFenceSignaled(m_cmd_buffer_fences[commandBufferId % m_cmd_buffer_fences.size()]);
 }
 
 void VulkanRenderer::WaitCommandBufferFinished(uint64 commandBufferId)
@@ -2297,7 +2298,7 @@ void VulkanRenderer::WaitCommandBufferFinished(uint64 commandBufferId)
 	if (commandBufferId == m_numSubmittedCmdBuffers)
 		SubmitCommandBuffer();
 	WaitRenderWorkerIdle();
-	while (HasCommandBufferFinished(commandBufferId) == false)
+	while (!HasRetiredCommandBuffer(commandBufferId))
 		WaitForNextFinishedCommandBuffer();
 }
 
@@ -4106,7 +4107,7 @@ bool VKRDestructibleObject::canDestroy()
 {
 	if (m_refCount > 0)
 		return false;
-	return VulkanRenderer::GetInstance()->HasCommandBufferFinished(m_lastCmdBufferId);
+	return VulkanRenderer::GetInstance()->HasRetiredCommandBuffer(m_lastCmdBufferId);
 }
 
 VKRObjectTexture::VKRObjectTexture()
