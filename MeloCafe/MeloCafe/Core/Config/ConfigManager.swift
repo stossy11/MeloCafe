@@ -475,6 +475,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var dumpGraphicsAssets: Binding<Bool> {
+        Binding {
+            self.config.dumpGraphicsAssets
+        } set: {
+            self.config.dumpGraphicsAssets = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var notificationPosition: Binding<ScreenPosition> {
         Binding {
             ScreenPosition(self.config.notificationPosition)
